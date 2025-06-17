@@ -33,6 +33,12 @@ static inline uint32_t lane_sequence_from_mask(uint32_t mask_keep)
     return seq;
 }
 
+template <std::size_t Align>
+static inline std::size_t round_up_bytes(std::size_t bytes) noexcept
+{
+    return (bytes + Align - 1) & ~(Align - 1);
+}
+
 // inline void batch_floor_normalize(
 //     const float *dist,
 //     int32_t *output, // 输出为 int 数组

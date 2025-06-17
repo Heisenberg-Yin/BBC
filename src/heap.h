@@ -8,24 +8,65 @@
 #include <utility>
 #include <iostream>
 #include <memory.h>
+#include <fast_scan.h>
 
 struct PairBucket
 {
     float *val = nullptr;    // 距离值
     uint32_t *idx = nullptr; // 对应ID
-    std::size_t sz = 0;
-    std::size_t cap = 0;
+    uint32_t sz = 0;
+    uint32_t cap = 0;
 
-    void reserve(std::size_t new_cap)
+    void reserve(uint32_t new_cap)
     {
         if (new_cap <= cap)
             return; // 够用，直接返回
 
-        float *new_val = static_cast<float *>(std::aligned_alloc(32, new_cap * sizeof(float)));
-        uint32_t *new_idx = static_cast<uint32_t *>(std::aligned_alloc(32, new_cap * sizeof(uint32_t)));
+        // 1) 选择对齐粒度：64 B 适配 AVX-512，亦兼容 32 B
+#if defined(__AVX512F__)
+        constexpr uint8_t kAlign = 64;
+#elif defined(__AVX2__)
+        constexpr uint8_t kAlign = 32;
+#endif
 
-        std::memcpy(new_val, val, sz * sizeof(float));
-        std::memcpy(new_idx, idx, sz * sizeof(uint32_t));
+        // 2) 分配对齐内存（长度需为对齐粒度的整数倍）
+        float *new_val = static_cast<float *>(
+            std::aligned_alloc(kAlign, round_up_bytes<kAlign>(new_cap * sizeof(float))));
+        uint32_t *new_idx = static_cast<uint32_t *>(
+            std::aligned_alloc(kAlign, round_up_bytes<kAlign>(new_cap * sizeof(uint32_t))));
+
+        // 3) SIMD 拷贝旧数据
+#if defined(__AVX512F__)
+        constexpr uint8_t kStep = 16; // 16 × 4 B = 64 B
+        uint32_t i = 0;
+        for (; i + kStep <= sz; i += kStep)
+        {
+            // val (float)
+            __m512 v = _mm512_load_ps(val + i); // 已对齐，可用 aligned load
+            _mm512_store_ps(new_val + i, v);    // 对齐 store
+
+            // idx (uint32_t)
+            __m512i vi = _mm512_load_si512(reinterpret_cast<const __m512i *>(idx + i));
+            _mm512_store_si512(reinterpret_cast<__m512i *>(new_idx + i), vi);
+        }
+#elif defined(__AVX2__)
+        constexpr uint8_t kStep = 8; // 8 × 4 B = 32 B
+        uint32_t i = 0;
+        for (; i + kStep <= sz; i += kStep)
+        {
+            __m256 v = _mm256_load_ps(val + i);
+            _mm256_store_ps(new_val + i, v);
+
+            __m256i vi = _mm256_load_si256(reinterpret_cast<const __m256i *>(idx + i));
+            _mm256_store_si256(reinterpret_cast<__m256i *>(new_idx + i), vi);
+        }
+#endif
+        const uint32_t tail = sz - i;
+        if (tail)
+        {
+            std::memcpy(new_val + i, val + i, tail * sizeof(float));
+            std::memcpy(new_idx + i, idx + i, tail * sizeof(uint32_t));
+        }
 
         std::free(val);
         std::free(idx);
@@ -57,19 +98,39 @@ struct PairBucket
         float *dst_val = val + sz;
         uint32_t *dst_idx = idx + sz;
 
-        /* SIMD 拷贝 8 条/批 */
+#if defined(__AVX512F__)
+        constexpr uint8_t kStep = 16;
         uint8_t i = 0;
-        for (; i + 8 <= n; i += 8)
+        for (; i + kStep <= n; i += kStep)
         {
-            _mm256_store_ps(dst_val + i, _mm256_loadu_ps(src_val + i));
-            _mm256_store_si256(reinterpret_cast<__m256i *>(dst_idx + i),
-                               _mm256_loadu_si256(reinterpret_cast<const __m256i *>(src_idx + i)));
+            // 浮点数据
+            __m512 v = _mm512_loadu_ps(src_val + i);
+            _mm512_store_ps(dst_val + i, v); // dst 已对齐，可用 store_ps
+
+            // 整数索引
+            __m512i vi = _mm512_loadu_si512(reinterpret_cast<const void *>(src_idx + i));
+            _mm512_store_si512(reinterpret_cast<void *>(dst_idx + i), vi);
         }
-        // 处理余数
-        for (; i < n; ++i)
+#elif defined(__AVX2__) // ------- AVX2 (256-bit) -------
+        constexpr uint8_t kStep = 8; // 8 × 32-bit = 256 bit
+        uint8_t i = 0;
+        for (; i + kStep <= n; i += kStep)
         {
-            dst_val[i] = src_val[i];
-            dst_idx[i] = src_idx[i];
+            __m256 v = _mm256_loadu_ps(src_val + i);
+            _mm256_store_ps(dst_val + i, v);
+
+            __m256i vi = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(src_idx + i));
+            _mm256_store_si256(reinterpret_cast<__m256i *>(dst_idx + i), vi);
+        }
+#else                   // ------- 标量回退 -------
+        uint8_t i = 0;
+#endif
+
+        /* 处理剩余 < kStep 的元素（或无 SIMD 时所有元素） */
+        for (uint8_t j = i; j < n; ++j)
+        {
+            dst_val[j] = src_val[j];
+            dst_idx[j] = src_idx[j];
         }
 
         sz += n;
@@ -79,7 +140,7 @@ struct PairBucket
     inline void clear() { sz = 0; }
 
     /* -------- 常用只读接口 -------- */
-    std::size_t size() const { return sz; }
+    uint32_t size() const { return sz; }
     bool empty() const { return sz == 0; }
 
     const float *val_data() const { return val; }
@@ -103,201 +164,156 @@ struct PairBucket
 class TopKBufferSoA
 {
 public:
-    TopKBufferSoA(uint32_t k,                   // top-k
-                  uint32_t physical_bucket_num, // 物理桶数
-                  uint32_t logical_bucket_num)  // 桶数
-        : k_(k), physical_bucket_num_(physical_bucket_num), logical_bucket_num_(logical_bucket_num)
+    /* ---------- 常量与别名 ---------- */
+#if defined(__AVX512F__)
+    static constexpr uint8_t kAlign = 64;
+#elif defined(__AVX2__)
+    static constexpr uint8_t kAlign = 32;
+#endif
+    static constexpr uint8_t BlockSize = 64; // 顺序写缓冲条数
+
+    /* ---------- 写缓冲块 ---------- */
+    struct alignas(kAlign) BlockBuf
     {
-        bucketed_upper_buffer_.resize(physical_bucket_num_);
-        // bucketed_lower_buffer_.resize(physical_bucket_num_);
-        // bucketed_exact_buffer_.resize(physical_bucket_num_);
-        tmp_upper_.resize(physical_bucket_num_); // ← add
-        code_lut_ = new PORTABLE_ALIGN64 uint8_t[logical_bucket_num_];
-        for (uint32_t i = 0; i < physical_bucket_num_; ++i)
-        {
-            bucketed_upper_buffer_[i].reserve(k_ * 2);
-            // bucketed_lower_buffer_[i].reserve(k_ * 2);
-            // bucketed_exact_buffer_[i].reserve(k_ * 2);
-        }
-        logical_threshold_bucket_id_ = logical_bucket_num_;   // 最右桶
-        physical_threshold_bucket_id_ = physical_bucket_num_; // 最右桶
+        float dist[BlockSize];
+        uint32_t id[BlockSize];
+        uint8_t pos = 0; // 已写入元素计数
+    };
+
+    /* ---------- 构造 / 析构 ---------- */
+    TopKBufferSoA(uint32_t k,
+                  uint32_t physical_bucket_num,
+                  uint32_t logical_bucket_num)
+        : k_(k),
+          logical_bucket_num_(logical_bucket_num),
+          logical_threshold_bucket_id_(logical_bucket_num),
+          physical_bucket_num_(physical_bucket_num),
+          physical_threshold_bucket_id_(physical_bucket_num),
+          bucket_list(physical_bucket_num),
+          bucket_buffer_(physical_bucket_num)
+    {
+        /* LUT：logical→physical 桶映射，按 kAlign 对齐 */
+        const uint32_t lut_bytes =
+            round_up_bytes<kAlign>(logical_bucket_num_);
+        code_lut_ = static_cast<uint8_t *>(
+            std::aligned_alloc(kAlign, lut_bytes));
+
+        /* 预留每个桶的 PairBuffer 容量（2 × K） */
+        for (auto &B : bucket_list)
+            B.reserve(k_ * 2);
     }
 
-    uint8_t *get_code_lut()
+    /* 禁止拷贝，仅允许移动（必要时可自行实现） */
+    TopKBufferSoA(const TopKBufferSoA &) = delete;
+    TopKBufferSoA &operator=(const TopKBufferSoA &) = delete;
+
+    ~TopKBufferSoA() { std::free(code_lut_); }
+
+    uint8_t *get_code_lut() { return code_lut_; }
+
+    /* 设置上下界（可在搜索开头调用） */
+    void set_bounds(float lo, float up, float d)
     {
-        return code_lut_;
+        lower_ = lo;
+        upper_ = up;
+        delta_ = d;
+        logical_threshold_bucket_id_ = logical_bucket_num_;
+        physical_threshold_bucket_id_ = physical_bucket_num_;
     }
 
-    void set_bounds(float lowest, float upper, float delta) // ← 多一个阈值数组
-    {
-        lower_ = lowest;
-        upper_ = upper;
-        delta_ = delta;
-        logical_threshold_bucket_id_ = logical_bucket_num_;   // 最右桶
-        physical_threshold_bucket_id_ = physical_bucket_num_; // 最右桶
-    }
-
-    /* ---------- push API ---------- */
-    // inline void push_upper(uint32_t b, KeyType ub, KeyType lb, DataType lb_code, DataType id)
-    // {
-    //     bucketed_upper_buffer_[b].emplace(ub, lb, lb_code, id);
-    // }
-
-    // // 假设 KeyType 对应 float, DataType 对应 uint32_t/int32_t
-    // inline void push_upper_batch(uint32_t b,
-    //                              const KeyType *ub_arr,
-    //                              const KeyType *lb_arr,
-    //                              const DataType *lb_code_arr,
-    //                              const DataType *id_arr,
-    //                              std::size_t n)
-    // {
-    //     // 直接批量插入 n 条
-    //     bucketed_upper_buffer_[b].emplace_batch(
-    //         ub_arr,
-    //         lb_arr,
-    //         reinterpret_cast<const uint32_t *>(lb_code_arr),
-    //         reinterpret_cast<const uint32_t *>(id_arr),
-    //         n);
-    // }
-
-    // inline void push_upper(uint32_t b, KeyType lb, DataType id)
-    // {
-    //     bucketed_upper_buffer_[code_lut_[b]].emplace(lb, id);
-    // }
-
+    /* —— PUSH：写入一条 upper-bound 候选 —— */
     inline void push_upper(uint32_t b_logical, float lb, uint32_t id)
     {
-        const uint32_t b = code_lut_[b_logical]; // physical bucket id
-        BlockBuf32 &blk = tmp_upper_[b];
+        const uint32_t b = code_lut_[b_logical]; // physical bucket ID
+        BlockBuf &blk = bucket_buffer_[b];
 
-        // ① 写入缓冲（顺序写，L1 命中）
+        /* 顺序写入 L1 缓冲块 */
         blk.dist[blk.pos] = lb;
         blk.id[blk.pos] = id;
         ++blk.pos;
 
+        // #if defined(__GNUC__) || defined(__clang__)
+        //         /* 预取下一行，减轻回写停顿（可选） */
+        //         if (blk.pos + 16 < BlockSize)
+        //             _mm_prefetch(reinterpret_cast<const char *>(blk.dist + blk.pos + 16),
+        //                          _MM_HINT_T0);
+        // #endif
+        /* 块写满：批量写入 PairBucket */
         if (blk.pos == BlockSize)
         {
-            PairBucket &bucket = bucketed_upper_buffer_[b];
-            bucket.emplace_batch(blk.dist, blk.id, BlockSize); // 批量写入
-            blk.pos = 0;                                       // 清空块
-        }
-    }
-
-    // inline void push_lower(uint32_t b, KeyType dist, DataType id)
-    // {
-    //     bucketed_lower_buffer_[code_lut_[b]].emplace(dist, id);
-    // }
-
-    // inline void push_exact(uint32_t b, KeyType dist, DataType id)
-    // {
-    //     bucketed_exact_buffer_[code_lut_[b]].emplace(dist, id);
-    // }
-
-    void reset()
-    {
-        for (auto &B : bucketed_upper_buffer_)
-            B.clear();
-        // for (auto &B : bucketed_lower_buffer_)
-        //     B.clear();
-        // for (auto &B : bucketed_exact_buffer_)
-        //     B.clear();
-
-        logical_threshold_bucket_id_ = logical_bucket_num_;
-        physical_threshold_bucket_id_ = physical_bucket_num_; // 最右桶
-    }
-
-    void update_th_code()
-    {
-        uint32_t acc = 0;
-        uint32_t j = 0;
-        for (uint32_t i = 0; i < physical_bucket_num_; ++i)
-        {
-            acc += static_cast<uint32_t>(bucketed_upper_buffer_[i].size());
-            while (j < logical_bucket_num_ && code_lut_[j] == i)
-            {
-                ++j;
-            }
-            if (acc >= k_)
-            {                                          // 一旦达到 k_
-                logical_threshold_bucket_id_ = j;      // 当前 pseudo id 即阈值
-                physical_threshold_bucket_id_ = i + 1; // 当前物理桶 id
-                return;
-            }
-        }
-        logical_threshold_bucket_id_ = logical_bucket_num_;
-        physical_threshold_bucket_id_ = physical_bucket_num_; // 最右桶
-    }
-
-    void update_th_code_with_exact()
-    {
-        uint32_t acc = 0;
-        uint32_t j = 0;
-        for (uint32_t i = 0; i < physical_bucket_num_; ++i)
-        {
-            acc += static_cast<uint32_t>(bucketed_upper_buffer_[i].size() + bucketed_exact_buffer_[i].size());
-            while (j < logical_bucket_num_ && code_lut_[j] == i)
-            {
-                ++j;
-            }
-            if (acc >= k_)
-            {                                          // 一旦达到 k_
-                logical_threshold_bucket_id_ = j;      // 当前 pseudo id 即阈值
-                physical_threshold_bucket_id_ = i + 1; // 当前物理桶 id
-                return;
-            }
-        }
-        logical_threshold_bucket_id_ = logical_bucket_num_;
-        physical_threshold_bucket_id_ = physical_bucket_num_; // 最右桶
-    }
-
-    void flush_all_upper()
-    {
-        for (uint32_t b = 0; b < physical_threshold_bucket_id_; ++b)
-        {
-            BlockBuf32 &blk = tmp_upper_[b];
-            if (blk.pos == 0)
-                continue;
-
-            PairBucket &bucket = bucketed_upper_buffer_[b];
-            bucket.emplace_batch(blk.dist, blk.id, blk.pos); // 批量写入
+            bucket_list[b].emplace_batch(blk.dist, blk.id, BlockSize);
             blk.pos = 0;
         }
     }
 
+    /* —— 全量 flush：将残余写回 PairBucket —— */
+    void flush_all_upper()
+    {
+        for (uint32_t b = 0; b < physical_threshold_bucket_id_; ++b)
+        {
+            BlockBuf &blk = bucket_buffer_[b];
+            if (blk.pos)
+            {
+                bucket_list[b].emplace_batch(blk.dist, blk.id, blk.pos);
+                blk.pos = 0;
+            }
+        }
+    }
+
+    /* —— 清空全部数据 —— */
+    void reset()
+    {
+        for (auto &B : bucket_list)
+            B.clear();
+        for (auto &blk : bucket_buffer_)
+            blk.pos = 0;
+        logical_threshold_bucket_id_ = logical_bucket_num_;
+        physical_threshold_bucket_id_ = physical_bucket_num_;
+    }
+
+    /* —— 阈值更新：找到逻辑/物理阈值桶 —— */
+    void update_th_code()
+    {
+        uint32_t acc = 0, j = 0; // 已累积元素/逻辑桶游标
+        for (uint32_t i = 0; i < physical_bucket_num_; ++i)
+        {
+            acc += static_cast<uint32_t>(bucket_list[i].size());
+            while (j < logical_bucket_num_ && code_lut_[j] == i)
+                ++j;
+
+            if (acc >= k_)
+            {
+                logical_threshold_bucket_id_ = j;      // 逻辑阈值桶 (pseudo)
+                physical_threshold_bucket_id_ = i + 1; // 物理阈值桶 (exclusive)
+                return;
+            }
+        }
+        /* 如果不足 k，则阈值指向最右端 */
+        logical_threshold_bucket_id_ = logical_bucket_num_;
+        physical_threshold_bucket_id_ = physical_bucket_num_;
+    }
+
+    /* ---------- getters ---------- */
     uint32_t get_logical_bucket_num() const { return logical_bucket_num_; }
     uint32_t get_physical_bucket_num() const { return physical_bucket_num_; }
     uint32_t get_logical_threshold_bucket_id() const { return logical_threshold_bucket_id_; }
     uint32_t get_physical_threshold_bucket_id() const { return physical_threshold_bucket_id_; }
-
     float get_delta() const { return delta_; }
     float get_lower() const { return lower_; }
     float get_upper() const { return upper_; }
-
-    auto &get_upper_buffer() { return bucketed_upper_buffer_; }
-    // auto &get_lower_buffer() { return bucketed_lower_buffer_; }
-    // auto &get_exact_buffer() { return bucketed_exact_buffer_; }
+    auto &get_upper_buffer() { return bucket_list; } // 供外部遍历
 
 private:
-    uint32_t k_;
-    uint32_t logical_bucket_num_;
-    uint32_t logical_threshold_bucket_id_;
-    uint32_t physical_bucket_num_;
-    uint32_t physical_threshold_bucket_id_;
+    /* ---------- 成员变量 ---------- */
+    uint32_t k_;                            // top-k
+    uint32_t logical_bucket_num_;           // 逻辑桶总数
+    uint32_t logical_threshold_bucket_id_;  // 逻辑阈值桶 (pseudo)
+    uint32_t physical_bucket_num_;          // 物理桶总数
+    uint32_t physical_threshold_bucket_id_; // 物理阈值桶 (exclusive)
 
-    float lower_{}, upper_{}, delta_{};
-    PORTABLE_ALIGN64 uint8_t *code_lut_;
-    std::vector<PairBucket> bucketed_upper_buffer_;
-    // std::vector<PairBucket> bucketed_lower_buffer_;
-    // std::vector<PairBucket> bucketed_exact_buffer_;
-    constexpr static uint8_t BlockSize = 64; // 每个块的大小
-    struct BlockBuf32
-    {
-        alignas(32) float dist[BlockSize];
-        alignas(32) uint32_t id[BlockSize];
-        uint8_t pos = 0; // 已写条数
-    };
-    std::vector<BlockBuf32> tmp_upper_; // size = physical_bucket_num_
+    float lower_{}, upper_{}, delta_{}; // 搜索上下界 & 步长
 
-    /* 临时批量缓冲：只在 early_stage_ 使用 */
-    std::vector<float> stage_dist_;
+    alignas(kAlign) uint8_t *code_lut_;   // logical→physical LUT
+    std::vector<PairBucket> bucket_list;  // 每个物理桶的 PairBucket
+    std::vector<BlockBuf> bucket_buffer_; // 写缓冲块
 };
