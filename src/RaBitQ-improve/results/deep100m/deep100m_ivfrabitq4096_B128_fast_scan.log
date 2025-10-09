@@ -1,0 +1,865 @@
+------------------------------------------------
+nprobe = 10 k = 5000
+Recall = 72.7051%	Ratio = 0
+Time = 2634.87 us 	 QPS = 379.526 query/s
+average rerank_count: 35471
+------------------------------------------------
+nprobe = 30 k = 5000
+Recall = 88.4742%	Ratio = 0
+Time = 4307.36 us 	 QPS = 232.161 query/s
+average rerank_count: 43145
+------------------------------------------------
+nprobe = 50 k = 5000
+Recall = 92.8438%	Ratio = 0
+Time = 5514.02 us 	 QPS = 181.356 query/s
+average rerank_count: 47508
+------------------------------------------------
+nprobe = 70 k = 5000
+Recall = 94.8269%	Ratio = 0
+Time = 6445.81 us 	 QPS = 155.139 query/s
+average rerank_count: 50444
+------------------------------------------------
+nprobe = 90 k = 5000
+Recall = 95.9437%	Ratio = 0
+Time = 7262.67 us 	 QPS = 137.69 query/s
+average rerank_count: 52648
+------------------------------------------------
+nprobe = 110 k = 5000
+Recall = 96.6345%	Ratio = 0
+Time = 8081.29 us 	 QPS = 123.743 query/s
+average rerank_count: 54307
+------------------------------------------------
+nprobe = 130 k = 5000
+Recall = 97.0968%	Ratio = 0
+Time = 8790.29 us 	 QPS = 113.762 query/s
+average rerank_count: 55690
+------------------------------------------------
+nprobe = 150 k = 5000
+Recall = 97.4207%	Ratio = 0
+Time = 9499.25 us 	 QPS = 105.271 query/s
+average rerank_count: 56834
+------------------------------------------------
+nprobe = 170 k = 5000
+Recall = 97.6531%	Ratio = 0
+Time = 10308.8 us 	 QPS = 97.0043 query/s
+average rerank_count: 57763
+------------------------------------------------
+nprobe = 190 k = 5000
+Recall = 97.8283%	Ratio = 0
+Time = 10951.4 us 	 QPS = 91.3123 query/s
+average rerank_count: 58585
+------------------------------------------------
+nprobe = 210 k = 5000
+Recall = 98.1826%	Ratio = 0
+Time = 11540.1 us 	 QPS = 86.6547 query/s
+average rerank_count: 69933
+------------------------------------------------
+nprobe = 230 k = 5000
+Recall = 98.2791%	Ratio = 0
+Time = 12144.9 us 	 QPS = 82.3392 query/s
+average rerank_count: 70577
+------------------------------------------------
+nprobe = 250 k = 5000
+Recall = 98.3569%	Ratio = 0
+Time = 12754.9 us 	 QPS = 78.401 query/s
+average rerank_count: 71164
+------------------------------------------------
+nprobe = 270 k = 5000
+Recall = 98.4183%	Ratio = 0
+Time = 13339.5 us 	 QPS = 74.9656 query/s
+average rerank_count: 71701
+------------------------------------------------
+nprobe = 290 k = 5000
+Recall = 98.4685%	Ratio = 0
+Time = 13929.6 us 	 QPS = 71.7894 query/s
+average rerank_count: 72172
+------------------------------------------------
+nprobe = 10 k = 10000
+Recall = 68.944%	Ratio = 0
+Time = 3495.08 us 	 QPS = 286.117 query/s
+average rerank_count: 40552
+------------------------------------------------
+nprobe = 30 k = 10000
+Recall = 86.3705%	Ratio = 0
+Time = 5681.52 us 	 QPS = 176.009 query/s
+average rerank_count: 54638
+------------------------------------------------
+nprobe = 50 k = 10000
+Recall = 91.4896%	Ratio = 0
+Time = 7128.33 us 	 QPS = 140.285 query/s
+average rerank_count: 62007
+------------------------------------------------
+nprobe = 70 k = 10000
+Recall = 93.8943%	Ratio = 0
+Time = 8314.71 us 	 QPS = 120.269 query/s
+average rerank_count: 66928
+------------------------------------------------
+nprobe = 90 k = 10000
+Recall = 95.2785%	Ratio = 0
+Time = 9308.15 us 	 QPS = 107.433 query/s
+average rerank_count: 70549
+------------------------------------------------
+nprobe = 110 k = 10000
+Recall = 96.1496%	Ratio = 0
+Time = 10216.1 us 	 QPS = 97.8849 query/s
+average rerank_count: 73332
+------------------------------------------------
+nprobe = 130 k = 10000
+Recall = 96.7411%	Ratio = 0
+Time = 11058.7 us 	 QPS = 90.4261 query/s
+average rerank_count: 75536
+------------------------------------------------
+nprobe = 150 k = 10000
+Recall = 97.1593%	Ratio = 0
+Time = 11843.6 us 	 QPS = 84.4339 query/s
+average rerank_count: 77456
+------------------------------------------------
+nprobe = 170 k = 10000
+Recall = 97.4635%	Ratio = 0
+Time = 12604.2 us 	 QPS = 79.3389 query/s
+average rerank_count: 78956
+------------------------------------------------
+nprobe = 190 k = 10000
+Recall = 97.6945%	Ratio = 0
+Time = 13353.1 us 	 QPS = 74.889 query/s
+average rerank_count: 80320
+------------------------------------------------
+nprobe = 210 k = 10000
+Recall = 97.99%	Ratio = 0
+Time = 13955.3 us 	 QPS = 71.6576 query/s
+average rerank_count: 92676
+------------------------------------------------
+nprobe = 230 k = 10000
+Recall = 98.128%	Ratio = 0
+Time = 14654.3 us 	 QPS = 68.2394 query/s
+average rerank_count: 93781
+------------------------------------------------
+nprobe = 250 k = 10000
+Recall = 98.2408%	Ratio = 0
+Time = 15296.7 us 	 QPS = 65.3736 query/s
+average rerank_count: 94801
+------------------------------------------------
+nprobe = 10 k = 20000
+Recall = 64.3366%	Ratio = 0
+Time = 4709.65 us 	 QPS = 212.33 query/s
+average rerank_count: 52879
+------------------------------------------------
+nprobe = 30 k = 20000
+Recall = 83.5992%	Ratio = 0
+Time = 7741.23 us 	 QPS = 129.179 query/s
+average rerank_count: 76766
+------------------------------------------------
+nprobe = 50 k = 20000
+Recall = 89.6214%	Ratio = 0
+Time = 9629.61 us 	 QPS = 103.846 query/s
+average rerank_count: 88925
+------------------------------------------------
+nprobe = 70 k = 20000
+Recall = 92.5433%	Ratio = 0
+Time = 11119 us 	 QPS = 89.9364 query/s
+average rerank_count: 96808
+------------------------------------------------
+nprobe = 90 k = 20000
+Recall = 94.2615%	Ratio = 0
+Time = 12368.2 us 	 QPS = 80.8525 query/s
+average rerank_count: 102571
+------------------------------------------------
+nprobe = 110 k = 20000
+Recall = 95.3572%	Ratio = 0
+Time = 13480.3 us 	 QPS = 74.1821 query/s
+average rerank_count: 107151
+------------------------------------------------
+nprobe = 130 k = 20000
+Recall = 96.1164%	Ratio = 0
+Time = 14492 us 	 QPS = 69.0036 query/s
+average rerank_count: 110925
+------------------------------------------------
+nprobe = 150 k = 20000
+Recall = 96.6616%	Ratio = 0
+Time = 15438.3 us 	 QPS = 64.7741 query/s
+average rerank_count: 114113
+------------------------------------------------
+nprobe = 170 k = 20000
+Recall = 97.0659%	Ratio = 0
+Time = 16322.1 us 	 QPS = 61.2666 query/s
+average rerank_count: 116731
+------------------------------------------------
+nprobe = 190 k = 20000
+Recall = 97.3765%	Ratio = 0
+Time = 17158.8 us 	 QPS = 58.279 query/s
+average rerank_count: 118993
+------------------------------------------------
+nprobe = 210 k = 20000
+Recall = 97.7165%	Ratio = 0
+Time = 17860.3 us 	 QPS = 55.9901 query/s
+average rerank_count: 131099
+------------------------------------------------
+nprobe = 230 k = 20000
+Recall = 97.9105%	Ratio = 0
+Time = 18620.6 us 	 QPS = 53.7039 query/s
+average rerank_count: 133032
+------------------------------------------------
+nprobe = 250 k = 20000
+Recall = 98.0692%	Ratio = 0
+Time = 19391.2 us 	 QPS = 51.5697 query/s
+average rerank_count: 134731
+------------------------------------------------
+nprobe = 270 k = 20000
+Recall = 98.1998%	Ratio = 0
+Time = 20096.6 us 	 QPS = 49.7596 query/s
+average rerank_count: 136194
+------------------------------------------------
+nprobe = 290 k = 20000
+Recall = 98.3076%	Ratio = 0
+Time = 20797.1 us 	 QPS = 48.0837 query/s
+average rerank_count: 137484
+------------------------------------------------
+nprobe = 10 k = 40000
+Recall = 58.6605%	Ratio = 0
+Time = 6252.81 us 	 QPS = 159.928 query/s
+average rerank_count: 75072
+------------------------------------------------
+nprobe = 30 k = 40000
+Recall = 79.9015%	Ratio = 0
+Time = 10661.1 us 	 QPS = 93.7985 query/s
+average rerank_count: 116776
+------------------------------------------------
+nprobe = 50 k = 40000
+Recall = 87.0196%	Ratio = 0
+Time = 13291.1 us 	 QPS = 75.2383 query/s
+average rerank_count: 137810
+------------------------------------------------
+nprobe = 70 k = 40000
+Recall = 90.6037%	Ratio = 0
+Time = 15290.2 us 	 QPS = 65.4016 query/s
+average rerank_count: 151622
+------------------------------------------------
+nprobe = 90 k = 40000
+Recall = 92.7592%	Ratio = 0
+Time = 16967.9 us 	 QPS = 58.9348 query/s
+average rerank_count: 161739
+------------------------------------------------
+nprobe = 110 k = 40000
+Recall = 94.1673%	Ratio = 0
+Time = 18432.1 us 	 QPS = 54.2532 query/s
+average rerank_count: 169726
+------------------------------------------------
+nprobe = 130 k = 40000
+Recall = 95.159%	Ratio = 0
+Time = 19736.5 us 	 QPS = 50.6675 query/s
+average rerank_count: 176118
+------------------------------------------------
+nprobe = 150 k = 40000
+Recall = 95.8841%	Ratio = 0
+Time = 20932.5 us 	 QPS = 47.7727 query/s
+average rerank_count: 181694
+------------------------------------------------
+nprobe = 170 k = 40000
+Recall = 96.4304%	Ratio = 0
+Time = 22038.6 us 	 QPS = 45.3749 query/s
+average rerank_count: 186514
+------------------------------------------------
+nprobe = 190 k = 40000
+Recall = 96.8563%	Ratio = 0
+Time = 23095.3 us 	 QPS = 43.2989 query/s
+average rerank_count: 190640
+------------------------------------------------
+nprobe = 210 k = 40000
+Recall = 97.2303%	Ratio = 0
+Time = 24247.8 us 	 QPS = 41.2408 query/s
+average rerank_count: 198075
+------------------------------------------------
+nprobe = 230 k = 40000
+Recall = 97.4994%	Ratio = 0
+Time = 25184.3 us 	 QPS = 39.7073 query/s
+average rerank_count: 201220
+------------------------------------------------
+nprobe = 250 k = 40000
+Recall = 97.7207%	Ratio = 0
+Time = 26085.7 us 	 QPS = 38.3351 query/s
+average rerank_count: 204104
+------------------------------------------------
+nprobe = 270 k = 40000
+Recall = 97.9043%	Ratio = 0
+Time = 26941.6 us 	 QPS = 37.1173 query/s
+average rerank_count: 206650
+------------------------------------------------
+nprobe = 290 k = 40000
+Recall = 98.057%	Ratio = 0
+Time = 27792.8 us 	 QPS = 35.9806 query/s
+average rerank_count: 209068
+------------------------------------------------
+nprobe = 30 k = 100000
+Recall = 73.0004%	Ratio = 0
+Time = 17529.7 us 	 QPS = 57.0462 query/s
+average rerank_count: 214505
+------------------------------------------------
+nprobe = 60 k = 100000
+Recall = 84.5821%	Ratio = 0
+Time = 24315.2 us 	 QPS = 41.1265 query/s
+average rerank_count: 283150
+------------------------------------------------
+nprobe = 90 k = 100000
+Recall = 89.5723%	Ratio = 0
+Time = 28923.9 us 	 QPS = 34.5735 query/s
+average rerank_count: 324520
+------------------------------------------------
+nprobe = 120 k = 100000
+Recall = 92.309%	Ratio = 0
+Time = 32471.3 us 	 QPS = 30.7964 query/s
+average rerank_count: 353640
+------------------------------------------------
+nprobe = 150 k = 100000
+Recall = 94.0369%	Ratio = 0
+Time = 35531.2 us 	 QPS = 28.1443 query/s
+average rerank_count: 376008
+------------------------------------------------
+nprobe = 180 k = 100000
+Recall = 95.2033%	Ratio = 0
+Time = 38236.3 us 	 QPS = 26.1531 query/s
+average rerank_count: 393953
+------------------------------------------------
+nprobe = 210 k = 100000
+Recall = 96.0299%	Ratio = 0
+Time = 40608.2 us 	 QPS = 24.6256 query/s
+average rerank_count: 407935
+------------------------------------------------
+nprobe = 240 k = 100000
+Recall = 96.639%	Ratio = 0
+Time = 42827.4 us 	 QPS = 23.3496 query/s
+average rerank_count: 420555
+------------------------------------------------
+nprobe = 270 k = 100000
+Recall = 97.1036%	Ratio = 0
+Time = 44853.4 us 	 QPS = 22.2949 query/s
+average rerank_count: 1965
+------------------------------------------------
+nprobe = 300 k = 100000
+Recall = 97.4632%	Ratio = 0
+Time = 46788.3 us 	 QPS = 21.3729 query/s
+average rerank_count: 11167
+------------------------------------------------
+nprobe = 330 k = 100000
+Recall = 97.7472%	Ratio = 0
+Time = 48539.4 us 	 QPS = 20.6018 query/s
+average rerank_count: 19230
+------------------------------------------------
+nprobe = 360 k = 100000
+Recall = 97.9738%	Ratio = 0
+Time = 50138.9 us 	 QPS = 19.9446 query/s
+average rerank_count: 26661
+------------------------------------------------
+nprobe = 390 k = 100000
+Recall = 98.1596%	Ratio = 0
+Time = 51710.7 us 	 QPS = 19.3384 query/s
+average rerank_count: 33330
+------------------------------------------------
+nprobe = 10 k = 100
+Recall = 85.3198%	Ratio = 0
+Time = 1451.54 us 	 QPS = 688.922 query/s
+average rerank_count: 28808
+------------------------------------------------
+nprobe = 20 k = 100
+Recall = 92.3935%	Ratio = 0
+Time = 1834.74 us 	 QPS = 545.037 query/s
+average rerank_count: 29185
+------------------------------------------------
+nprobe = 30 k = 100
+Recall = 94.9478%	Ratio = 0
+Time = 2163.71 us 	 QPS = 462.168 query/s
+average rerank_count: 29454
+------------------------------------------------
+nprobe = 40 k = 100
+Recall = 96.1906%	Ratio = 0
+Time = 2472.03 us 	 QPS = 404.526 query/s
+average rerank_count: 29631
+------------------------------------------------
+nprobe = 50 k = 100
+Recall = 96.9063%	Ratio = 0
+Time = 2786.39 us 	 QPS = 358.887 query/s
+average rerank_count: 29770
+------------------------------------------------
+nprobe = 60 k = 100
+Recall = 97.3325%	Ratio = 0
+Time = 3086.15 us 	 QPS = 324.028 query/s
+average rerank_count: 29880
+------------------------------------------------
+nprobe = 70 k = 100
+Recall = 97.6166%	Ratio = 0
+Time = 3407.17 us 	 QPS = 293.499 query/s
+average rerank_count: 29975
+------------------------------------------------
+nprobe = 80 k = 100
+Recall = 97.8192%	Ratio = 0
+Time = 3708.91 us 	 QPS = 269.621 query/s
+average rerank_count: 30052
+------------------------------------------------
+nprobe = 10 k = 5000
+Recall = 72.903%	Ratio = 0
+Time = 2743.9 us 	 QPS = 364.445 query/s
+average rerank_count: 35298
+------------------------------------------------
+nprobe = 50 k = 5000
+Recall = 93.2484%	Ratio = 0
+Time = 5808.99 us 	 QPS = 172.147 query/s
+average rerank_count: 49803
+------------------------------------------------
+nprobe = 90 k = 5000
+Recall = 96.3602%	Ratio = 0
+Time = 7753.93 us 	 QPS = 128.967 query/s
+average rerank_count: 55856
+------------------------------------------------
+nprobe = 130 k = 5000
+Recall = 97.5096%	Ratio = 0
+Time = 9324.8 us 	 QPS = 107.241 query/s
+average rerank_count: 59462
+------------------------------------------------
+nprobe = 170 k = 5000
+Recall = 98.0572%	Ratio = 0
+Time = 10778.2 us 	 QPS = 92.7797 query/s
+average rerank_count: 61919
+------------------------------------------------
+nprobe = 10 k = 5000
+Recall = 72.9105%	Ratio = 0
+Time = 2704.72 us 	 QPS = 369.724 query/s
+average rerank_count: 35410
+------------------------------------------------
+nprobe = 40 k = 5000
+Recall = 91.5277%	Ratio = 0
+Time = 5120.61 us 	 QPS = 195.289 query/s
+average rerank_count: 47610
+------------------------------------------------
+nprobe = 70 k = 5000
+Recall = 95.2194%	Ratio = 0
+Time = 6725.81 us 	 QPS = 148.681 query/s
+average rerank_count: 53385
+------------------------------------------------
+nprobe = 100 k = 5000
+Recall = 96.7147%	Ratio = 0
+Time = 8079.92 us 	 QPS = 123.764 query/s
+average rerank_count: 56963
+------------------------------------------------
+nprobe = 130 k = 5000
+Recall = 97.4812%	Ratio = 0
+Time = 9245.14 us 	 QPS = 108.165 query/s
+average rerank_count: 59487
+------------------------------------------------
+nprobe = 160 k = 5000
+Recall = 97.9232%	Ratio = 0
+Time = 10342.4 us 	 QPS = 96.6892 query/s
+average rerank_count: 61387
+------------------------------------------------
+nprobe = 190 k = 5000
+Recall = 98.197%	Ratio = 0
+Time = 11317.4 us 	 QPS = 88.3592 query/s
+average rerank_count: 62872
+------------------------------------------------
+nprobe = 220 k = 5000
+Recall = 98.3263%	Ratio = 0
+Time = 12329.4 us 	 QPS = 81.1069 query/s
+average rerank_count: 72314
+------------------------------------------------
+nprobe = 250 k = 5000
+Recall = 98.4427%	Ratio = 0
+Time = 13306.9 us 	 QPS = 75.1487 query/s
+average rerank_count: 73282
+------------------------------------------------
+nprobe = 280 k = 5000
+Recall = 98.5264%	Ratio = 0
+Time = 14213.9 us 	 QPS = 70.3536 query/s
+average rerank_count: 74105
+------------------------------------------------
+nprobe = 310 k = 5000
+Recall = 98.5638%	Ratio = 0
+Time = 15045.3 us 	 QPS = 66.4659 query/s
+average rerank_count: 78757
+------------------------------------------------
+nprobe = 10 k = 10000
+Recall = 69.0769%	Ratio = 0
+Time = 3760.44 us 	 QPS = 265.927 query/s
+average rerank_count: 42374
+------------------------------------------------
+nprobe = 40 k = 10000
+Recall = 89.7346%	Ratio = 0
+Time = 6846.54 us 	 QPS = 146.059 query/s
+average rerank_count: 64224
+------------------------------------------------
+nprobe = 70 k = 10000
+Recall = 94.1773%	Ratio = 0
+Time = 8833.82 us 	 QPS = 113.201 query/s
+average rerank_count: 74052
+------------------------------------------------
+nprobe = 100 k = 10000
+Recall = 96.041%	Ratio = 0
+Time = 10395.7 us 	 QPS = 96.1937 query/s
+average rerank_count: 80187
+------------------------------------------------
+nprobe = 130 k = 10000
+Recall = 97.0302%	Ratio = 0
+Time = 11748.5 us 	 QPS = 85.1172 query/s
+average rerank_count: 84555
+------------------------------------------------
+nprobe = 160 k = 10000
+Recall = 97.616%	Ratio = 0
+Time = 12971.3 us 	 QPS = 77.0932 query/s
+average rerank_count: 87869
+------------------------------------------------
+nprobe = 190 k = 10000
+Recall = 97.9897%	Ratio = 0
+Time = 14131.5 us 	 QPS = 70.7639 query/s
+average rerank_count: 90490
+------------------------------------------------
+nprobe = 220 k = 10000
+Recall = 98.2205%	Ratio = 0
+Time = 15179.3 us 	 QPS = 65.8792 query/s
+average rerank_count: 98750
+------------------------------------------------
+nprobe = 250 k = 10000
+Recall = 98.391%	Ratio = 0
+Time = 16197.6 us 	 QPS = 61.7375 query/s
+average rerank_count: 100492
+------------------------------------------------
+nprobe = 280 k = 10000
+Recall = 98.5149%	Ratio = 0
+Time = 17188.5 us 	 QPS = 58.1785 query/s
+average rerank_count: 101977
+------------------------------------------------
+nprobe = 30 k = 20000
+Recall = 83.716%	Ratio = 0
+Time = 8320.14 us 	 QPS = 120.19 query/s
+average rerank_count: 86031
+------------------------------------------------
+nprobe = 60 k = 20000
+Recall = 91.4517%	Ratio = 0
+Time = 11388.6 us 	 QPS = 87.8068 query/s
+average rerank_count: 106196
+------------------------------------------------
+nprobe = 90 k = 20000
+Recall = 94.4275%	Ratio = 0
+Time = 13547.5 us 	 QPS = 73.8144 query/s
+average rerank_count: 118013
+------------------------------------------------
+nprobe = 120 k = 20000
+Recall = 95.9485%	Ratio = 0
+Time = 15045 us 	 QPS = 66.4671 query/s
+average rerank_count: 126161
+------------------------------------------------
+nprobe = 150 k = 20000
+Recall = 96.8518%	Ratio = 0
+Time = 16487.2 us 	 QPS = 60.6532 query/s
+average rerank_count: 132290
+------------------------------------------------
+nprobe = 180 k = 20000
+Recall = 97.4264%	Ratio = 0
+Time = 17853.8 us 	 QPS = 56.0106 query/s
+average rerank_count: 137111
+------------------------------------------------
+nprobe = 210 k = 20000
+Recall = 97.8317%	Ratio = 0
+Time = 19487.2 us 	 QPS = 51.3158 query/s
+average rerank_count: 143272
+------------------------------------------------
+nprobe = 240 k = 20000
+Recall = 98.1068%	Ratio = 0
+Time = 20696.7 us 	 QPS = 48.317 query/s
+average rerank_count: 146484
+------------------------------------------------
+nprobe = 270 k = 20000
+Recall = 98.3103%	Ratio = 0
+Time = 21850.8 us 	 QPS = 45.7649 query/s
+average rerank_count: 149214
+------------------------------------------------
+nprobe = 300 k = 20000
+Recall = 98.4375%	Ratio = 0
+Time = 22852.2 us 	 QPS = 43.7594 query/s
+average rerank_count: 155939
+------------------------------------------------
+nprobe = 330 k = 20000
+Recall = 98.5493%	Ratio = 0
+Time = 23935.1 us 	 QPS = 41.7797 query/s
+average rerank_count: 157973
+------------------------------------------------
+nprobe = 360 k = 20000
+Recall = 98.6348%	Ratio = 0
+Time = 24995.1 us 	 QPS = 40.0079 query/s
+average rerank_count: 159757
+------------------------------------------------
+nprobe = 390 k = 20000
+Recall = 98.7021%	Ratio = 0
+Time = 25977.4 us 	 QPS = 38.495 query/s
+average rerank_count: 161342
+------------------------------------------------
+nprobe = 50 k = 40000
+Recall = 87.0822%	Ratio = 0
+Time = 14390.5 us 	 QPS = 69.4905 query/s
+average rerank_count: 153689
+------------------------------------------------
+nprobe = 100 k = 40000
+Recall = 93.6236%	Ratio = 0
+Time = 19215.1 us 	 QPS = 52.0424 query/s
+average rerank_count: 187864
+------------------------------------------------
+nprobe = 150 k = 40000
+Recall = 95.9925%	Ratio = 0
+Time = 22682.8 us 	 QPS = 44.0862 query/s
+average rerank_count: 207306
+------------------------------------------------
+nprobe = 200 k = 40000
+Recall = 97.1421%	Ratio = 0
+Time = 25551.8 us 	 QPS = 39.1362 query/s
+average rerank_count: 220486
+------------------------------------------------
+nprobe = 250 k = 40000
+Recall = 97.7972%	Ratio = 0
+Time = 28049.8 us 	 QPS = 35.6509 query/s
+average rerank_count: 230106
+------------------------------------------------
+nprobe = 300 k = 40000
+Recall = 98.1798%	Ratio = 0
+Time = 30306.4 us 	 QPS = 32.9963 query/s
+average rerank_count: 240201
+------------------------------------------------
+nprobe = 350 k = 40000
+Recall = 98.4382%	Ratio = 0
+Time = 32382.7 us 	 QPS = 30.8807 query/s
+average rerank_count: 246114
+------------------------------------------------
+nprobe = 400 k = 40000
+Recall = 98.594%	Ratio = 0
+Time = 34237.8 us 	 QPS = 29.2075 query/s
+average rerank_count: 255343
+------------------------------------------------
+nprobe = 30 k = 40000
+Recall = 79.9568%	Ratio = 0
+Time = 11507.2 us 	 QPS = 86.9019 query/s
+average rerank_count: 128953
+------------------------------------------------
+nprobe = 10 k = 500
+Recall = 81.6%	Ratio = 0
+Time = 1674.72 us 	 QPS = 597.114 query/s
+average rerank_count: 30078
+------------------------------------------------
+nprobe = 40 k = 500
+Recall = 95.0409%	Ratio = 0
+Time = 2982.94 us 	 QPS = 335.24 query/s
+average rerank_count: 31990
+------------------------------------------------
+nprobe = 70 k = 500
+Recall = 97.113%	Ratio = 0
+Time = 3952.39 us 	 QPS = 253.011 query/s
+average rerank_count: 33010
+------------------------------------------------
+nprobe = 100 k = 500
+Recall = 97.8269%	Ratio = 0
+Time = 4885.26 us 	 QPS = 204.697 query/s
+average rerank_count: 33641
+------------------------------------------------
+nprobe = 130 k = 500
+Recall = 98.1703%	Ratio = 0
+Time = 5761.4 us 	 QPS = 173.569 query/s
+average rerank_count: 34085
+------------------------------------------------
+nprobe = 200 k = 5000
+Recall = 98.2554%	Ratio = 0
+Time = 11690.2 us 	 QPS = 85.5418 query/s
+average rerank_count: 75626
+------------------------------------------------
+nprobe = 10 k = 500
+Recall = 81.5958%	Ratio = 0
+Time = 1680.48 us 	 QPS = 595.068 query/s
+average rerank_count: 34197
+------------------------------------------------
+nprobe = 30 k = 500
+Recall = 93.3469%	Ratio = 0
+Time = 2561.02 us 	 QPS = 390.469 query/s
+average rerank_count: 35653
+------------------------------------------------
+nprobe = 60 k = 500
+Recall = 96.6675%	Ratio = 0
+Time = 3619.56 us 	 QPS = 276.276 query/s
+average rerank_count: 36917
+------------------------------------------------
+nprobe = 90 k = 500
+Recall = 97.6377%	Ratio = 0
+Time = 4601.69 us 	 QPS = 217.312 query/s
+average rerank_count: 37643
+------------------------------------------------
+nprobe = 120 k = 500
+Recall = 98.0475%	Ratio = 0
+Time = 5507.7 us 	 QPS = 181.564 query/s
+average rerank_count: 38167
+------------------------------------------------
+nprobe = 150 k = 500
+Recall = 98.2487%	Ratio = 0
+Time = 6348.88 us 	 QPS = 157.508 query/s
+average rerank_count: 38533
+------------------------------------------------
+nprobe = 180 k = 500
+Recall = 98.3577%	Ratio = 0
+Time = 7239.38 us 	 QPS = 138.133 query/s
+average rerank_count: 38809
+------------------------------------------------
+nprobe = 210 k = 500
+Recall = 98.4685%	Ratio = 0
+Time = 8199.53 us 	 QPS = 121.958 query/s
+average rerank_count: 42484
+------------------------------------------------
+nprobe = 10 k = 5000
+Recall = 72.9044%	Ratio = 0
+Time = 2726.47 us 	 QPS = 366.775 query/s
+average rerank_count: 39436
+------------------------------------------------
+nprobe = 30 k = 5000
+Recall = 88.8412%	Ratio = 0
+Time = 4548.43 us 	 QPS = 219.856 query/s
+average rerank_count: 48692
+------------------------------------------------
+nprobe = 60 k = 5000
+Recall = 94.4075%	Ratio = 0
+Time = 6314.44 us 	 QPS = 158.367 query/s
+average rerank_count: 55764
+------------------------------------------------
+nprobe = 90 k = 5000
+Recall = 96.3649%	Ratio = 0
+Time = 7670.99 us 	 QPS = 130.361 query/s
+average rerank_count: 59906
+------------------------------------------------
+nprobe = 120 k = 5000
+Recall = 97.308%	Ratio = 0
+Time = 8848.77 us 	 QPS = 113.01 query/s
+average rerank_count: 62724
+------------------------------------------------
+nprobe = 150 k = 5000
+Recall = 97.8339%	Ratio = 0
+Time = 9972.46 us 	 QPS = 100.276 query/s
+average rerank_count: 64826
+------------------------------------------------
+nprobe = 180 k = 5000
+Recall = 98.1536%	Ratio = 0
+Time = 11030.3 us 	 QPS = 90.6597 query/s
+average rerank_count: 66450
+------------------------------------------------
+nprobe = 210 k = 5000
+Recall = 98.3173%	Ratio = 0
+Time = 11989.4 us 	 QPS = 83.4072 query/s
+average rerank_count: 75928
+------------------------------------------------
+nprobe = 10 k = 10000
+Recall = 69.0731%	Ratio = 0
+Time = 3627.46 us 	 QPS = 275.675 query/s
+average rerank_count: 46501
+------------------------------------------------
+nprobe = 30 k = 10000
+Recall = 86.5986%	Ratio = 0
+Time = 6000.6 us 	 QPS = 166.65 query/s
+average rerank_count: 63300
+------------------------------------------------
+nprobe = 60 k = 10000
+Recall = 93.1389%	Ratio = 0
+Time = 8215.22 us 	 QPS = 121.725 query/s
+average rerank_count: 75339
+------------------------------------------------
+nprobe = 90 k = 10000
+Recall = 95.5558%	Ratio = 0
+Time = 9854.24 us 	 QPS = 101.479 query/s
+average rerank_count: 82354
+------------------------------------------------
+nprobe = 120 k = 10000
+Recall = 96.7602%	Ratio = 0
+Time = 11236.6 us 	 QPS = 88.9953 query/s
+average rerank_count: 87145
+------------------------------------------------
+nprobe = 150 k = 10000
+Recall = 97.4516%	Ratio = 0
+Time = 12507.2 us 	 QPS = 79.9536 query/s
+average rerank_count: 90719
+------------------------------------------------
+nprobe = 180 k = 10000
+Recall = 97.8845%	Ratio = 0
+Time = 13681.5 us 	 QPS = 73.0916 query/s
+average rerank_count: 93523
+------------------------------------------------
+nprobe = 210 k = 10000
+Recall = 98.145%	Ratio = 0
+Time = 14769.6 us 	 QPS = 67.7065 query/s
+average rerank_count: 101920
+------------------------------------------------
+nprobe = 100 k = 10000
+Recall = 96.0334%	Ratio = 0
+Time = 10422.1 us 	 QPS = 95.9502 query/s
+average rerank_count: 84055
+------------------------------------------------
+nprobe = 200 k = 10000
+Recall = 98.058%	Ratio = 0
+Time = 14300.1 us 	 QPS = 69.9298 query/s
+average rerank_count: 101182
+------------------------------------------------
+nprobe = 300 k = 10000
+Recall = 98.5496%	Ratio = 0
+Time = 17687.1 us 	 QPS = 56.5385 query/s
+average rerank_count: 111446
+------------------------------------------------
+nprobe = 400 k = 10000
+Recall = 98.7087%	Ratio = 0
+Time = 20679.9 us 	 QPS = 48.3562 query/s
+average rerank_count: 117454
+------------------------------------------------
+nprobe = 500 k = 10000
+Recall = 98.7728%	Ratio = 0
+Time = 23516.3 us 	 QPS = 42.5237 query/s
+average rerank_count: 120998
+------------------------------------------------
+nprobe = 600 k = 10000
+Recall = 98.7977%	Ratio = 0
+Time = 26304.1 us 	 QPS = 38.0168 query/s
+average rerank_count: 123084
+------------------------------------------------
+nprobe = 700 k = 10000
+Recall = 98.8085%	Ratio = 0
+Time = 29047.5 us 	 QPS = 34.4264 query/s
+average rerank_count: 124364
+------------------------------------------------
+nprobe = 800 k = 10000
+Recall = 98.8192%	Ratio = 0
+Time = 31750.9 us 	 QPS = 31.4951 query/s
+average rerank_count: 125142
+------------------------------------------------
+nprobe = 100 k = 10000
+Recall = 96.0487%	Ratio = 0
+Time = 10385.3 us 	 QPS = 96.2898 query/s
+average rerank_count: 84210
+------------------------------------------------
+nprobe = 200 k = 10000
+Recall = 98.0656%	Ratio = 0
+Time = 14409.1 us 	 QPS = 69.4004 query/s
+average rerank_count: 101320
+------------------------------------------------
+nprobe = 300 k = 10000
+Recall = 98.5543%	Ratio = 0
+Time = 17715.6 us 	 QPS = 56.4476 query/s
+average rerank_count: 111583
+------------------------------------------------
+nprobe = 400 k = 10000
+Recall = 98.7197%	Ratio = 0
+Time = 20733.7 us 	 QPS = 48.2306 query/s
+average rerank_count: 117592
+------------------------------------------------
+nprobe = 500 k = 10000
+Recall = 98.782%	Ratio = 0
+Time = 23548.1 us 	 QPS = 42.4662 query/s
+average rerank_count: 121141
+------------------------------------------------
+nprobe = 600 k = 10000
+Recall = 98.8083%	Ratio = 0
+Time = 26289.9 us 	 QPS = 38.0374 query/s
+average rerank_count: 123230
+------------------------------------------------
+nprobe = 700 k = 10000
+Recall = 98.8213%	Ratio = 0
+Time = 29091.3 us 	 QPS = 34.3746 query/s
+average rerank_count: 124465
+------------------------------------------------
+nprobe = 800 k = 10000
+Recall = 98.8335%	Ratio = 0
+Time = 31849.4 us 	 QPS = 31.3978 query/s
+average rerank_count: 125228
