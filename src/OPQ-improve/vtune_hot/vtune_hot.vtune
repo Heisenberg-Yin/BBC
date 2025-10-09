@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+ <rdmgr>
+  <timestamp type="u64_t">1758851962</timestamp>
+  <hostname type="string">SCALE-cong4</hostname>
+  <os type="string">linux</os>
+  <product type="string">Intel® VTune™ Profiler 2025.3.0</product>
+  <buildNumber type="s32_t">630104</buildNumber>
+  <logicalCPUCount type="s32_t">48</logicalCPUCount>
+  <physicalCoreCount type="s32_t">24</physicalCoreCount>
+  <processorPackageCount type="s32_t">1</processorPackageCount>
+  <CPUFrequency type="s64_t">1794369000</CPUFrequency>
+  <CPUFamily type="s32_t">25</CPUFamily>
+  <CPUModel type="s32_t">8</CPUModel>
+  <CPUStepping type="s32_t">2</CPUStepping>
+  <CPUBrandName type="string">AMD Ryzen Threadripper PRO 5965WX 24-Cores</CPUBrandName>
+  <isa type="string">avx2</isa>
+  <collectionTimeBegin type="u64_t">1758851962</collectionTimeBegin>
+  <collectionTimeEnd type="u64_t">1758852055</collectionTimeEnd>
+  <variables>
+   <at type="string">hs</at>
+  </variables>
+ </rdmgr>
+</root>

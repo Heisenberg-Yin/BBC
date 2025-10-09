@@ -1,0 +1,1 @@
+/usr/bin/c++ -std=c++11 -fdiagnostics-color=auto -g -ggdb -Ofast -m64 -march=native -ffast-math -Wall CMakeFiles/main.dir/pqfastscan/main.cpp.o CMakeFiles/main.dir/pqfastscan/binheap.cpp.o CMakeFiles/scan_naive.dir/pqscan/scan_naive.cpp.o CMakeFiles/common.dir/common.cpp.o CMakeFiles/benchmark.dir/benchmark.cpp.o CMakeFiles/benchmark.dir/perfevents.cpp.o -o main  -lpfm

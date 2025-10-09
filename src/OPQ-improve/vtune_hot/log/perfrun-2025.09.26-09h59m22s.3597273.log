@@ -1,0 +1,107 @@
+0 [140117740596096] INFO perfrun.launcher <> - Launcher main begin
+0 [140117740596096] INFO perfrun.launcher <> - MessageCatalogInit finished
+0 [140117740596096] INFO perfrun.launcher <> - Launcher instance created
+0 [140117740596096] INFO perfrun.launcher <> - argc = 7; cmdline = /opt/intel/oneapi/vtune/2025.3/bin64/amplxe-runss --ui-output-format xml --ui-output-fd 5 --option-file /mnt/hdd/yinziqi/yinziqi/large-heap/src/OPQ-improve/vtune_hot/config/runss.options 
+19 [140117740596096] INFO perfrun.perfcollector <> - SEP tool path: /opt/intel/oneapi/vtune/2025.3/bin64/sep
+23 [140117740596096] INFO perfrun.launcher <> - create msngr2::ICliToolContext
+23 [140117740596096] INFO perfrun.launcher <> - create file finder object
+23 [140117740596096] INFO perfrun.launcher <> - create a result directory: pattern = /mnt/hdd/yinziqi/yinziqi/large-heap/src/OPQ-improve/vtune_hot pid = 4294967295
+24 [140117740596096] INFO perfrun.sdk <> - checked that the directory /mnt/hdd/yinziqi/yinziqi/large-heap/src/OPQ-improve/vtune_hot is a local directory
+24 [140117740596096] INFO perfrun.sdk <> - the directory /mnt/hdd/yinziqi/yinziqi/large-heap/src/OPQ-improve/vtune_hot is a local directory with FS type ID 61267
+24 [140117740596096] INFO perfrun.launcher <> - create data directory = /mnt/hdd/yinziqi/yinziqi/large-heap/src/OPQ-improve/vtune_hot/data.0
+24 [140117740596096] INFO perfrun.launcher <> - Creating the master collection flag
+57 [140117740596096] INFO perfrun.launcher <> - Done creating the master collection flag
+60 [140117584897600] INFO perfrun.launcher <> - plugin [remoteplug] was disabled because it doesn't support the given collection type.
+60 [140117584897600] INFO perfrun.sdk <> - Allocating TMU :/mnt/hdd/yinziqi/yinziqi/large-heap/src/OPQ-improve/vtune_hot/data.0/systemcollector-3597273-SCALE-cong4.sc
+60 [140117584897600] INFO perfrun.system <> - Tpss based collection
+60 [140117584897600] INFO perfrun.launcher <> - plugin [ptracecollector] was disabled because it doesn't support the given collection type.
+60 [140117584897600] INFO perfrun.launcher <> - plugin [gpu] was disabled because it doesn't support the given collection type.
+60 [140117584897600] INFO perfrun.launcher <> - plugin [] was disabled because it doesn't support the given collection type.
+60 [140117584897600] INFO perfrun.launcher <> - plugin [] was disabled because it doesn't support the given collection type.
+60 [140117584897600] INFO perfrun.launcher <> - plugin [] was disabled because it doesn't support the given collection type.
+60 [140117584897600] INFO perfrun.mrte <> - system-wide mode is 0
+60 [140117584897600] INFO perfrun.mrte <> - Getting  mrte profiling environment ...
+65 [140117584897600] INFO perfrun.mrte <> - INTEL_MRTE_DATA_DIR=/mnt/hdd/yinziqi/yinziqi/large-heap/src/OPQ-improve/vtune_hot/data.0
+65 [140117584897600] INFO perfrun.mrte <> - INTEL_MRTE_HOST_NAME=SCALE-cong4
+65 [140117584897600] INFO perfrun.mrte <> - JAVA_TOOL_OPTIONS=-agentlib:amplxe_samplingmrte_javaprof_1.0 -Dsun.boot.library.path=/opt/intel/oneapi/vtune/2025.3/lib32/runtime:/opt/intel/oneapi/vtune/2025.3/lib64/runtime
+65 [140117584897600] INFO perfrun.mrte <> - LD_LIBRARY_PATH=/opt/intel/oneapi/vtune/2025.3/lib32/runtime:/opt/intel/oneapi/vtune/2025.3/lib64/runtime
+65 [140117584897600] INFO perfrun.mrte <> - CORECLR_ENABLE_PROFILING=1
+65 [140117584897600] INFO perfrun.mrte <> - CORECLR_PROFILER={AA5E4821-E3B1-479c-B7FF-5AD047D22CED}
+65 [140117584897600] INFO perfrun.mrte <> - CORECLR_PROFILER_PATH=/opt/intel/oneapi/vtune/2025.3/lib64/libamplxe_samplingmrte_clrprof_1.0.so
+65 [140117584897600] INFO perfrun.mrte <> - INTEL_MRTE_PROFILER_MODE=mixed
+65 [140117584897600] INFO perfrun.mrte <> - Data directory: /mnt/hdd/yinziqi/yinziqi/large-heap/src/OPQ-improve/vtune_hot/data.0
+65 [140117584897600] INFO perfrun.mrte <> - Mrte plugin is initialized
+65 [140117584897600] INFO perfrun.launcher <> - plugin [emon] was disabled because it doesn't support the given collection type.
+65 [140117584897600] INFO perfrun.launcher <> - plugin [cuscol] was disabled because it doesn't support the given collection type.
+65 [140117584897600] INFO perfrun.launcher <> - plugin [stdsrc] was disabled because it doesn't support the given collection type.
+65 [140117584897600] INFO perfrun.launcher <> - plugin [sep] was disabled because it doesn't support the given collection type.
+65 [140117584897600] INFO perfrun.launcher <> - plugin [vtsspp] was disabled because it doesn't support the given collection type.
+65 [140117584897600] INFO perfrun.launcher <> - plugin [perf] was disabled because it doesn't support the given collection type.
+65 [140117584897600] INFO perfrun.launcher <> - plugin [aoclprofile] was disabled because it doesn't support the given collection type.
+65 [140117584897600] INFO perfrun.tpss <> - initialize tpss controller
+65 [140117584897600] INFO perfrun.tpss <> - configure collection mode: value = cpu:counters:nostack
+65 [140117584897600] INFO perfrun.tpss <> - configure collection mode: value = cpu:stack
+65 [140117584897600] INFO perfrun.tpss <> - default obj-size-min=1024
+65 [140117584897600] INFO perfrun.tpss <> - default hash-table-size=0
+65 [140117584897600] INFO perfrun.launcher <> - plugin [media] was disabled because it doesn't support the given collection type.
+65 [140117584897600] INFO perfrun.launcher <> - plugin [] was disabled because it doesn't support the given collection type.
+65 [140117584897600] INFO perfrun.launcher <> - plugin [] was disabled because it doesn't support the given collection type.
+65 [140117584897600] INFO perfrun.launcher <> - plugin [parallelfs] was disabled because it doesn't support the given collection type.
+65 [140117584897600] INFO perfrun.launcher <> - plugin [power] was disabled because it doesn't support the given collection type.
+65 [140117584897600] INFO perfrun.launcher <> - plugin [] was disabled because it doesn't support the given collection type.
+65 [140117584897600] INFO perfrun.launcher <> - plugin [] was disabled because it doesn't support the given collection type.
+65 [140117584897600] INFO perfrun.launcher <> - plugin [] was disabled because it doesn't support the given collection type.
+65 [140117584897600] INFO perfrun.launcher <> - plugin [l0_metrics] was disabled because it doesn't support the given collection type.
+65 [140117584897600] INFO perfrun.launcher <> - plugin [stall_reasons] was disabled because it doesn't support the given collection type.
+65 [140117740596096] INFO perfrun.launcher <> - set environment variable: LD_LIBRARY_PATH = /opt/intel/oneapi/vtune/2025.3/lib32/runtime:/opt/intel/oneapi/vtune/2025.3/lib64/runtime
+65 [140117740596096] INFO perfrun.launcher <> - set environment variable: INTEL_LIBITTNOTIFY32 = /opt/intel/oneapi/vtune/2025.3/lib32/runtime/libittnotify_collector.so
+65 [140117740596096] INFO perfrun.launcher <> - set environment variable: INTEL_LIBITTNOTIFY64 = /opt/intel/oneapi/vtune/2025.3/lib64/runtime/libittnotify_collector.so
+65 [140117740596096] INFO perfrun.launcher <> - set environment variable: INTEL_ITTNOTIFY_GROUPS = 
+65 [140117740596096] INFO perfrun.launcher <> - set environment variable: INTEL_JIT_PROFILER32 = /opt/intel/oneapi/vtune/2025.3/lib32/runtime/libittnotify_collector.so
+65 [140117740596096] INFO perfrun.launcher <> - set environment variable: INTEL_JIT_PROFILER64 = /opt/intel/oneapi/vtune/2025.3/lib64/runtime/libittnotify_collector.so
+65 [140117740596096] INFO perfrun.launcher <> - set environment variable: CCL_ITT_LEVEL = 1
+65 [140117740596096] INFO perfrun.launcher <> - set environment variable: ENABLE_JITPROFILING = 1
+65 [140117740596096] INFO perfrun.launcher <> - set environment variable: CL_CONFIG_USE_VTUNE = True
+65 [140117740596096] INFO perfrun.launcher <> - set environment variable: KMP_FORKJOIN_FRAMES = 0
+65 [140117740596096] INFO perfrun.launcher <> - set environment variable: KMP_FORKJOIN_FRAMES_MODE = 0
+65 [140117740596096] INFO perfrun.launcher <> - set environment variable: INTEL_MRTE_DATA_DIR = /mnt/hdd/yinziqi/yinziqi/large-heap/src/OPQ-improve/vtune_hot/data.0
+65 [140117740596096] INFO perfrun.launcher <> - set environment variable: INTEL_MRTE_HOST_NAME = SCALE-cong4
+66 [140117740596096] INFO perfrun.launcher <> - set environment variable: JAVA_TOOL_OPTIONS = -agentlib:amplxe_samplingmrte_javaprof_1.0 -Dsun.boot.library.path=/opt/intel/oneapi/vtune/2025.3/lib32/runtime:/opt/intel/oneapi/vtune/2025.3/lib64/runtime
+66 [140117740596096] INFO perfrun.launcher <> - set environment variable: LD_LIBRARY_PATH = /opt/intel/oneapi/vtune/2025.3/lib32/runtime:/opt/intel/oneapi/vtune/2025.3/lib64/runtime
+66 [140117740596096] INFO perfrun.launcher <> - set environment variable: CORECLR_ENABLE_PROFILING = 1
+66 [140117740596096] INFO perfrun.launcher <> - set environment variable: CORECLR_PROFILER = {AA5E4821-E3B1-479c-B7FF-5AD047D22CED}
+66 [140117740596096] INFO perfrun.launcher <> - set environment variable: CORECLR_PROFILER_PATH = /opt/intel/oneapi/vtune/2025.3/lib64/libamplxe_samplingmrte_clrprof_1.0.so
+66 [140117740596096] INFO perfrun.launcher <> - set environment variable: INTEL_MRTE_PROFILER_MODE = mixed
+66 [140117740596096] INFO perfrun.launcher <> - RpcServer: run RPC server to handle requests
+66 [140117740596096] INFO perfrun.launcher <> - Launcher: command line to start before modification = ./search_c4-10m -d c4-10m -k 500 -s /mnt/hdd/yinziqi/yinziqi/large-heap/src/data/c4-10m/
+66 [140117740596096] INFO perfrun.launcher <> - Launcher: command line to start after modification = /opt/intel/oneapi/vtune/2025.3/bin64/pin -error_file /mnt/hdd/yinziqi/yinziqi/large-heap/src/OPQ-improve/vtune_hot/data.0/pinerr.tpsslog -detach_reattach -follow_execv -tool_load_option deepbind -t64 /opt/intel/oneapi/vtune/2025.3/lib64/libtpsstool.so -t /opt/intel/oneapi/vtune/2025.3/lib32/libtpsstool.so -server_name tpss_ipc.3597273 -prd_dir /opt/intel/oneapi/vtune/2025.3 -- ./search_c4-10m -d c4-10m -k 500 -s /mnt/hdd/yinziqi/yinziqi/large-heap/src/data/c4-10m/
+66 [140117740596096] INFO perfrun.launcher <> - ProcessCreator object was created
+67 [140117740596096] INFO perfrun.launcher <> - Launcher: the process was started in suspend mode
+69 [140117584897600] WARN perfrun.system <> - Could not do anything with /sys/kernel/debug/kvm: boost::filesystem::status: Permission denied [system:13]: "/sys/kernel/debug/kvm", at file: vcs/perfrun1/plugins/system/src/trace_writer.cpp:787
+69 [140117584897600] WARN perfrun.system <> - Folder "/var/run/libvirt/qemu/"doesn't exist, at file: vcs/perfrun1/plugins/system/src/trace_writer.cpp:800
+70 [140117584897600] WARN perfrun.sdk <> - Failed to find xl binary on any of the system paths: /bin, /sbin, /usr/bin, /usr/sbin., at file: vcs/perfrun1/sdk/src/utils.cpp:205
+71 [140117584897600] WARN perfrun.system <> - Could not start ContainerMapping collector, at file: vcs/perfrun1/plugins/system/src/controller.cpp:450
+91 [140117584897600] INFO perfrun.vdso <> - Helper runtool '/opt/intel/oneapi/vtune/2025.3/bin32/amplxe-runss -dump-vdso -r /mnt/hdd/yinziqi/yinziqi/large-heap/src/OPQ-improve/vtune_hot --tmp-dir /tmp/amplxe-tmp-yinziqi' returned 0
+129 [140117584897600] INFO perfrun.vdso <> - Helper runtool '/opt/intel/oneapi/vtune/2025.3/bin64/amplxe-runss -dump-vdso -r /mnt/hdd/yinziqi/yinziqi/large-heap/src/OPQ-improve/vtune_hot --tmp-dir /tmp/amplxe-tmp-yinziqi' returned 0
+129 [140117584897600] INFO perfrun.itt <> - start itt controller for pid #3597278
+129 [140117584897600] INFO perfrun.tpss <> - start tpss controller for pid #3597278
+179 [140117740596096] INFO perfrun.launcher <> - Launcher: all plugins were started
+179 [140117740596096] INFO perfrun.launcher <> - DirectoryMonitor object was created
+179 [140117740596096] INFO perfrun.launcher <> - DirectoryMonitor: a callback was added
+179 [140117740596096] INFO perfrun.launcher <> - DirectoryMonitor was started with pingTime = 1000
+179 [140117740596096] INFO perfrun.launcher <> - DeadlineTimer is going to be constructed
+180 [140117740596096] INFO perfrun.launcher <> - DeadlineTimer: a callback was added
+188 [140117740596096] INFO perfrun.launcher <> - Launcher: resume the profiled application and  wait its termination or stop command
+92347 [140117740596096] INFO perfrun.launcher <> - Launcher: the profiled application was terminated  with exit code = 0
+92349 [140117584897600] INFO perfrun.itt <> - detach itt controller
+92349 [140117584897600] INFO perfrun.itt <> - detach itt controller done
+92349 [140117584897600] INFO perfrun.tpss <> - stop tpss controller
+92350 [140117584897600] INFO perfrun.sdk <> - De-allocating TMU: /mnt/hdd/yinziqi/yinziqi/large-heap/src/OPQ-improve/vtune_hot/data.0/systemcollector-3597273-SCALE-cong4.sc
+92350 [140117584897600] INFO perfrun.system <> - closed the system trace file: /mnt/hdd/yinziqi/yinziqi/large-heap/src/OPQ-improve/vtune_hot/data.0/systemcollector-3597273-SCALE-cong4.sc
+92350 [140117740596096] INFO perfrun.launcher <> - Launcher: all plugins were stopped.
+92350 [140117740596096] INFO perfrun.launcher <> - DeadlineTimer is going to be destroyed
+92350 [140117740596096] INFO perfrun.launcher <> - DeadlineTimer was destroyed
+92350 [140117740596096] INFO perfrun.launcher <> - DirectoryMonitor object was destroyed
+92350 [140117740596096] WARN perfrun.launcher <> - Stop command is ignored because it is received when collection is already stopped, at file: vcs/perfrun1/launcher/src/command_handler.cpp:226
+92350 [140117740596096] INFO perfrun.launcher <> - Application exit code: 0
+92350 [140117740596096] INFO perfrun.launcher <> - Exit code: 0

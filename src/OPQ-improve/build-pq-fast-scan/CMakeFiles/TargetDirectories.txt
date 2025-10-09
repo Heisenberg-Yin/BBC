@@ -1,0 +1,6 @@
+/mnt/hdd/yinziqi/yinziqi/large-heap/src/OPQ/build-pq-fast-scan/CMakeFiles/common.dir
+/mnt/hdd/yinziqi/yinziqi/large-heap/src/OPQ/build-pq-fast-scan/CMakeFiles/benchmark.dir
+/mnt/hdd/yinziqi/yinziqi/large-heap/src/OPQ/build-pq-fast-scan/CMakeFiles/scan_naive.dir
+/mnt/hdd/yinziqi/yinziqi/large-heap/src/OPQ/build-pq-fast-scan/CMakeFiles/main.dir
+/mnt/hdd/yinziqi/yinziqi/large-heap/src/OPQ/build-pq-fast-scan/CMakeFiles/edit_cache.dir
+/mnt/hdd/yinziqi/yinziqi/large-heap/src/OPQ/build-pq-fast-scan/CMakeFiles/rebuild_cache.dir
