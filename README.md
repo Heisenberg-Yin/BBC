@@ -1,12 +1,12 @@
-# 🌟 QRCollector
+# 🌟 BRCollector
 
-**QRCollector (QR)** is a **plug-and-play tool** designed to enhance the efficiency of existing **approximate k-nearest neighbor (AKNN)** methods for **large-scale ANN queries**.  It can be seamlessly integrated with existing quantization-based methods to accelerate the collection and selection phases.
+**BRCollector (BRC)** is a **plug-and-play tool** designed to enhance the efficiency of existing **approximate k-nearest neighbor (AKNN)** methods for **large-$k$ ANN queries**.  It can be seamlessly integrated with existing quantization-based methods to accelerate the collection and selection phases.
 
 ---
 
 ## 🚀 Overview
 
-QRCollector introduces a quantization-based result buffer that serves as the top-k collector, along with two new re-ranking algorithms designed to accelerate the re-ranking process.
+BRCollector introduces a bucket-based result buffer that serves as the top-k collector, along with two new re-ranking algorithms designed to accelerate the re-ranking process.
 
 ---
 
@@ -16,11 +16,11 @@ This repository includes:
 - **Baselines**
   - `IVF+PQ`
   - `IVF+RaBitQ`
-- **QR-enhanced versions**
-  - `IVF+PQ+QR`
-  - `IVF+RaBitQ+QR`
+- **BRC-enhanced versions**
+  - `IVF+PQ+BRC`
+  - `IVF+RaBitQ+BRC`
 
-Each implementation demonstrates how QR integrates with existing quantization-based AKNN indexes to improve efficiency.
+Each implementation demonstrates how BRC integrates with existing quantization-based AKNN indexes to improve efficiency.
 
 ---
 
@@ -35,8 +35,6 @@ The datasets used in our experiments can be downloaded from the **public sources
 ```bash
 # Clone the repository
 # Clone the repository
-git clone https://github.com/yourusername/QRCollector.git
-cd QRCollector
 
 # ---------------------------------------------------
 # 🧩 Run IVF+RaBitQ
