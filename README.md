@@ -59,14 +59,14 @@ bash script/search.sh
 cd ../../
 
 # ---------------------------------------------------
-# ⚡ Run IVF+RaBitQ+QR
+# ⚡ Run IVF+RaBitQ+BRC
 # ---------------------------------------------------
 cd src/RaBitQ-improve/
 bash script/search.sh
 cd ../../
 
 # ---------------------------------------------------
-# ⚡ Run IVF+PQ+QR
+# ⚡ Run IVF+PQ+BRC
 # ---------------------------------------------------
 cd src/OPQ-improve/
 bash search.sh
