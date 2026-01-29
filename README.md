@@ -1,12 +1,12 @@
-# 🌟 BRCollector
+# 🌟 Bucket-based Result Collector
 
-**BRCollector (BRC)** is a **plug-and-play tool** designed to enhance the efficiency of existing **approximate k-nearest neighbor (AKNN)** methods for **large-$k$ ANN queries**.  It can be seamlessly integrated with existing quantization-based methods to accelerate the collection and selection phases.
+**Bucket-based Result Collector (BBC)** is a **plug-and-play tool** designed to enhance the efficiency of existing **approximate nearest neighbor (ANN)** methods for **large-$k$ ANN queries**.  It can be seamlessly integrated with existing quantization-based methods to accelerate the collection and selection phases.
 
 ---
 
 ## 🚀 Overview
 
-BRCollector introduces a bucket-based result buffer that serves as the top-k collector, along with two new re-ranking algorithms designed to accelerate the re-ranking process.
+Bucket-based Result Collector introduces a bucket-based result buffer that serves as the top-k collector, along with two new re-ranking algorithms designed to accelerate the re-ranking process.
 
 ---
 
@@ -16,11 +16,11 @@ This repository includes:
 - **Baselines**
   - `IVF+PQ`
   - `IVF+RaBitQ`
-- **BRC-enhanced versions**
-  - `IVF+PQ+BRC`
-  - `IVF+RaBitQ+BRC`
+- **BBC-enhanced versions**
+  - `IVF+PQ+BBC`
+  - `IVF+RaBitQ+BBC`
 
-Each implementation demonstrates how BRC integrates with existing quantization-based AKNN indexes to improve efficiency.
+Each implementation demonstrates how BBC integrates with existing quantization-based AKNN indexes to improve efficiency.
 
 ---
 
@@ -59,14 +59,14 @@ bash script/search.sh
 cd ../../
 
 # ---------------------------------------------------
-# ⚡ Run IVF+RaBitQ+BRC
+# ⚡ Run IVF+RaBitQ+BBC
 # ---------------------------------------------------
 cd src/RaBitQ-improve/
 bash script/search.sh
 cd ../../
 
 # ---------------------------------------------------
-# ⚡ Run IVF+PQ+BRC
+# ⚡ Run IVF+PQ+BBC
 # ---------------------------------------------------
 cd src/OPQ-improve/
 bash search.sh
