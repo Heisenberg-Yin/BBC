@@ -8,6 +8,7 @@
 
 Bucket-based Result Collector introduces a bucket-based result buffer that serves as the top-k collector, along with two new re-ranking algorithms designed to accelerate the re-ranking process.
 
+We also provide the full version paper in the github attachment file.
 ---
 
 ## 🧩 Implementations
