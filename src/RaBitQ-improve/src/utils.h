@@ -1,6 +1,8 @@
 #pragma once
 #include <chrono>
+#include <fcntl.h>
 #include <immintrin.h>
+#include <libaio.h>
 #include <limits>
 #include <queue>
 #include <unordered_set>
@@ -9,6 +11,217 @@
 #endif
 #define PORTABLE_ALIGN32 __attribute__((aligned(32)))
 #define PORTABLE_ALIGN64 __attribute__((aligned(64)))
+#include "robin_hood.h"
+#include <mutex>
+
+class AsyncVectorMap {
+private:
+  int fd;
+  io_context_t ctx;
+  size_t D;
+  size_t record_size;
+  unsigned max_events; // 记录队列最大容量
+  //   std::vector<float *> ptrs_;
+  float *pool_base;
+  size_t max_cache_size; // 池子最大容量（如 100,000）
+  // std::atomic<size_t> pool_idx; // 当前已使用的位置
+  robin_hood::unordered_flat_map<uint32_t, uint32_t> id_to_ptr_;
+  //   mutable std::mutex map_mutex_;
+
+public:
+  // 修改：保存 max_ctx 到成员变量
+  AsyncVectorMap(const char *path, size_t cache_capacity, size_t d,
+                 unsigned max_ctx = 4096)
+      : D(d), max_events(max_ctx), max_cache_size(cache_capacity) {
+
+    // 如果不用 O_DIRECT，libaio 经常会退化成同步阻塞，但兼容性更好。
+    // 如果追求极致性能且能处理对齐，建议加上 O_DIRECT。
+    fd = open(path, O_RDONLY);
+    if (fd < 0) {
+      perror("Failed to open base file");
+      exit(-1);
+    }
+
+    record_size = sizeof(unsigned) + D * sizeof(float);
+    ctx = 0;
+    if (io_setup(max_ctx, &ctx) != 0) {
+      perror("io_setup failed");
+      exit(-1);
+    }
+
+    size_t total_bytes = max_cache_size * D * sizeof(float);
+    if (posix_memalign((void **)&pool_base, 64, total_bytes) != 0) {
+      perror("Pool allocation failed");
+      exit(-1);
+    }
+
+    id_to_ptr_.reserve(cache_capacity);
+    // ptrs_(n, nullptr);
+  }
+  void reset() { id_to_ptr_.clear(); }
+
+  // 修改：通过索引计算指针
+  inline float *get_vector(uint32_t id) const {
+    auto it = id_to_ptr_.find(id);
+    if (it != id_to_ptr_.end()) {
+      // 指针 = 基础地址 + 索引 * 维度
+      return pool_base + (static_cast<size_t>(it->second) * D);
+    } else {
+      std::cerr << "Error: AsyncVectorMap miss id " << id << std::endl;
+      exit(-1);
+    }
+  }
+
+  void fetch_to_cache(const std::vector<uint32_t> &miss_ids) {
+    if (miss_ids.empty())
+      return;
+    size_t n = miss_ids.size();
+    std::vector<struct iocb> cbs(n);
+    std::vector<struct iocb *> p_cbs(n);
+    // std::cerr << "AIO fetch " << n << " vectors from disk." << std::endl;
+    // 1. 预分配池子空间，直接设置 DMA 目标地址
+    for (size_t i = 0; i < n; ++i) {
+      //   if (slot >= max_cache_size)
+      //     break; // 池子满了处理逻辑
+      float *target_ptr = pool_base + (i * D);
+
+      size_t offset =
+          1ULL * miss_ids[i] * record_size + sizeof(unsigned); // skip ID
+
+      // memset(&cbs[i], 0, sizeof(struct iocb));
+      // 【零拷贝】磁盘数据直接进入 Pool，不经过临时 buffer
+      io_prep_pread(&cbs[i], fd, target_ptr, D * sizeof(float), offset);
+      cbs[i].data = (void *)(uintptr_t)miss_ids[i];
+      p_cbs[i] = &cbs[i];
+    }
+    const size_t BATCH_SIZE = max_events; // 严格遵守队列上限
+    size_t submitted = 0;
+    size_t completed = 0;
+    std::vector<struct io_event> events(n);
+
+    while (completed < n) {
+      // --- 提交阶段 ---
+      // 只要已提交且未完成的数量小于 BATCH_SIZE，就可以继续提交
+      while (submitted < n && (submitted - completed) < BATCH_SIZE) {
+        size_t to_submit =
+            std::min(n - submitted, BATCH_SIZE - (submitted - completed));
+        int ret = io_submit(ctx, to_submit, p_cbs.data() + submitted);
+
+        if (ret < 0) {
+          if (ret == -EAGAIN)
+            break; // 队列真的满了，停止提交去收割 event
+          fprintf(stderr, "io_submit fatal: %s\n", strerror(-ret));
+          exit(-1);
+        }
+        submitted += ret;
+      }
+
+      // --- 收割阶段 ---
+      // 如果提交满了或者还有未完成的，必须等待至少 1 个 event
+      // 返回以释放队列空间
+      if (completed < submitted) {
+        // 参数说明：ctx, min_nr, max_nr, events, timeout
+        int r = io_getevents(ctx, 1, submitted - completed,
+                             events.data() + completed, nullptr);
+        if (r > 0) {
+          completed += r;
+        } else if (r < 0) {
+          fprintf(stderr, "io_getevents fatal: %s\n", strerror(-r));
+          exit(-1);
+        }
+      }
+    }
+
+    // 4. 建立映射
+    for (size_t i = 0; i < n; ++i) {
+      uint32_t id = (uint32_t)(uintptr_t)events[i].obj->data;
+      float *buf_ptr = (float *)events[i].obj->u.c.buf;
+      uint32_t pool_idx = (buf_ptr - pool_base) / D;
+      id_to_ptr_[id] = pool_idx;
+    }
+
+    // // 2. 提交 AIO
+    // int ret = io_submit(ctx, n, p_cbs.data());
+    // int completed = 0;
+    // while (completed < ret) {
+    //   int r = io_getevents(ctx, ret - completed, ret - completed,
+    //   events.data(),
+    //                        nullptr);
+    //   if (r > 0)
+    //     completed += r;
+    // }
+
+    // 3. 写入哈希表，之后 get(id) 就能立刻返回了
+    // {
+    //   //   std::lock_guard<std::mutex> lock(map_mutex_);
+    //   for (size_t i = 0; i < n; ++i) {
+    //     id_to_ptr_[miss_ids[i]] = i;
+    //   }
+    // }
+  }
+
+  //   void fetch_vectors(const std::vector<uint32_t> &ids, float *data_ptr) {
+  //     size_t total_n = ids.size();
+  //     if (total_n == 0)
+  //       return;
+
+  //     // 分批策略：每批次大小不能超过 max_events
+  //     // 建议设置为 1024 或 2048，留一点缓冲空间
+  //     //   const size_t BATCH_SIZE = std::min((size_t)max_events,
+  //     (size_t)4096);
+
+  //     std::vector<struct iocb> cbs(total_n);
+  //     std::vector<struct iocb *> p_cbs(total_n);
+  //     std::vector<struct io_event> events(total_n);
+
+  //     //   size_t processed = 0;
+
+  //     //   while (processed < total_n) {
+  //     //     size_t current_batch_size = std::min(BATCH_SIZE, total_n -
+  //     //     processed);
+
+  //     // 2. 准备 IOCB
+  //     for (size_t i = 0; i < total_n; ++i) {
+  //       long long offset = (long long)ids[i] * record_size +
+  //       sizeof(unsigned);
+
+  //       void *target_buffer = data_ptr + (1ull * idx * D);
+
+  //       memset(&cbs[i], 0, sizeof(struct iocb));
+  //       io_prep_pread(&cbs[i], fd, target_buffer, D * sizeof(float), offset);
+  //       p_cbs[i] = &cbs[i];
+  //     }
+
+  //     int ret = io_submit(ctx, current_batch_size, p_cbs.data());
+
+  //     if (ret < 0) {
+  //       perror("io_submit failed"); // 可能是 -EAGAIN (队列满)
+  //       break;
+  //     }
+
+  //     int submitted_count = ret; // 实际提交成功的数量
+  //     int completed_so_far = 0;
+  //     while (completed_so_far < submitted_count) {
+  //       int wait_nr = submitted_count - completed_so_far;
+  //       int r = io_getevents(ctx, wait_nr, wait_nr, events.data(), nullptr);
+
+  //       if (r < 0) {
+  //         perror("io_getevents failed");
+  //         break;
+  //       }
+  //       completed_so_far += r;
+  //     }
+  //     // processed += submitted_count;
+  //     //   }
+  //   }
+
+  ~AsyncVectorMap() {
+    if (pool_base)
+      free(pool_base);
+    io_destroy(ctx);
+    close(fd);
+  }
+};
 
 typedef std::pair<float, uint32_t> Result;
 typedef std::priority_queue<Result> ResultHeap;
@@ -183,7 +396,8 @@ struct PairBucket {
 
   const float *val_data() const { return val.data(); }
   const uint32_t *idx_data() const { return idx.data(); }
-
+  float *data_val() { return val.data(); }
+  uint32_t *data_idx() { return idx.data(); }
   void free_memory() {
     val.clear();
     idx.clear();
@@ -192,6 +406,63 @@ struct PairBucket {
   }
 
   PairBucket() = default;
+};
+
+struct PairIOBucket {
+  std::vector<float> val;         // 距离值
+  std::vector<uint32_t> idx;      // 对应 ID
+  std::vector<float *> data_ptrs; // 对应数据的指针
+
+  /* -------- 预分配 -------- */
+  void reserve(std::size_t new_cap) {
+    val.reserve(new_cap);
+    idx.reserve(new_cap);
+    data_ptrs.reserve(new_cap);
+  }
+
+  /* -------- 插入 (默认指针为 null) -------- */
+  inline void emplace(float v, uint32_t id_) {
+    // 注：std::vector 内部会自动处理扩容，
+    // 但如果你想手动控制扩容逻辑，可以保留这段：
+    if (val.size() == val.capacity()) {
+      std::size_t new_cap = val.capacity() == 0 ? 8 : val.capacity() * 2;
+      reserve(new_cap);
+    }
+
+    val.push_back(v);
+    idx.push_back(id_);
+    data_ptrs.push_back(nullptr); // 初始化为 nullptr，方便后续判断
+  }
+
+  /* -------- 更新特定位置的指针 -------- */
+  inline void set_ptr(std::size_t pos, float *ptr) {
+    if (pos < data_ptrs.size()) {
+      data_ptrs[pos] = ptr;
+    }
+  }
+
+  inline void clear() {
+    val.clear();
+    idx.clear();
+    data_ptrs.clear();
+  }
+
+  std::size_t size() const { return val.size(); }
+  bool empty() const { return val.empty(); }
+
+  const float *val_data() const { return val.data(); }
+  const uint32_t *idx_data() const { return idx.data(); }
+  float *const *ptr_data() const { return data_ptrs.data(); }
+
+  void free_memory() {
+    val.clear();
+    idx.clear();
+    data_ptrs.clear();
+    // 如果需要彻底释放内存（归还给系统）：
+  }
+
+  // 修复构造函数名称与结构体名一致
+  PairIOBucket() = default;
 };
 
 // struct QSPairBucket {
@@ -373,6 +644,129 @@ template <uint32_t B> struct ProbeInfo {
   uint8_t PORTABLE_ALIGN32 LUT[B / 4 * 16]; // aligned for SIMD
 #endif
 };
+
+// class TopKBufferSoAWithIO {
+// public:
+//   TopKBufferSoAWithIO(uint32_t k,                   // top-k
+//                       uint32_t physical_bucket_num, // 物理桶数
+//                       uint32_t logical_bucket_num)  // 桶数
+//       : k_(k), physical_bucket_num_(physical_bucket_num),
+//         logical_bucket_num_(logical_bucket_num) {
+//     bucketed_buffer_.resize(physical_bucket_num_);
+//     exact_buffer_.resize(physical_bucket_num_);
+//     lower_buffer_.resize(physical_bucket_num_);
+//     code_lut_ = new PORTABLE_ALIGN64 uint8_t[logical_bucket_num_];
+//     for (uint32_t i = 0; i < physical_bucket_num_; ++i) {
+//       bucketed_buffer_[i].reserve(k_ * 5);
+//       exact_buffer_[i].reserve(k_ * 5);
+//       lower_buffer_[i].reserve(k_ * 5);
+//     }
+//     logical_threshold_bucket_id_ = logical_bucket_num_;   // 最右桶
+//     physical_threshold_bucket_id_ = physical_bucket_num_; // 最右桶
+//   }
+
+//   uint8_t *get_code_lut() { return code_lut_; }
+
+//   void set_bounds(float lowest, float upper, float delta) // ← 多一个阈值数组
+//   {
+//     lower_ = lowest;
+//     upper_ = upper;
+//     delta_ = delta;
+//     logical_threshold_bucket_id_ = 1e7;                   // 最右桶
+//     physical_threshold_bucket_id_ = physical_bucket_num_; // 最右桶
+//   }
+
+//   inline void push(uint32_t b_logical, float lb, uint32_t id) {
+//     const uint32_t b = code_lut_[b_logical]; // physical bucket id
+//     PairIOBucket &bucket = bucketed_buffer_[b];
+//     bucket.emplace(lb, id);
+//   }
+
+//   inline void push_exact(uint32_t b_logical, float lb, uint32_t id) {
+//     const uint32_t b = code_lut_[b_logical]; // physical bucket id
+//     PairIOBucket &bucket = exact_buffer_[b];
+//     bucket.emplace(lb, id);
+//   }
+
+//   inline void push_lower(uint32_t b_logical, float lb, uint32_t id) {
+//     const uint32_t b = code_lut_[b_logical]; // physical bucket id
+//     PairIOBucket &bucket = lower_buffer_[b];
+//     bucket.emplace(lb, id);
+//   }
+
+//   void reset() {
+//     for (auto &B : bucketed_buffer_)
+//       B.clear();
+//     for (auto &B : exact_buffer_)
+//       B.clear();
+//     for (auto &B : lower_buffer_)
+//       B.clear();
+//     logical_threshold_bucket_id_ = 1e7;
+//     physical_threshold_bucket_id_ = physical_bucket_num_; // 最右桶
+//     // predict_logical_bucket_id_ = 0;
+//   }
+
+//   void update_th_code() {
+//     uint32_t acc = 0;
+//     uint32_t j = 0;
+//     for (uint32_t i = 0; i < physical_bucket_num_; ++i) {
+//       acc += static_cast<uint32_t>(bucketed_buffer_[i].size()) +
+//              static_cast<uint32_t>(exact_buffer_[i].size());
+
+//       while (j < logical_bucket_num_ && code_lut_[j] == i) {
+//         ++j;
+//       }
+
+//       if (acc >= k_) {                         // 一旦达到 k_
+//         logical_threshold_bucket_id_ = j;      // 当前 pseudo id 即阈值
+//         physical_threshold_bucket_id_ = i + 1; // 当前物理桶 id
+//         return;
+//       }
+//     }
+//     logical_threshold_bucket_id_ = 1e7;
+//     physical_threshold_bucket_id_ = physical_bucket_num_; // 最右桶
+//   }
+
+//   uint32_t get_logical_bucket_num() const { return logical_bucket_num_; }
+//   uint32_t get_physical_bucket_num() const { return physical_bucket_num_; }
+//   uint32_t get_logical_threshold_bucket_id() const {
+//     return logical_threshold_bucket_id_;
+//   }
+//   uint32_t get_physical_threshold_bucket_id() const {
+//     return physical_threshold_bucket_id_;
+//   }
+//   uint32_t get_predict_logical_bucket_id() const {
+//     return predict_logical_bucket_id_;
+//   }
+//   uint32_t get_predict_physical_bucket_id() const {
+//     return code_lut_[predict_logical_bucket_id_];
+//   }
+
+//   void set_predict_logical_bucket_id(uint32_t id) {
+//     predict_logical_bucket_id_ = id;
+//   }
+
+//   float get_delta() const { return delta_; }
+//   float get_lower() const { return lower_; }
+//   float get_upper() const { return upper_; }
+
+//   auto &get_buffer() { return bucketed_buffer_; }
+//   auto &get_exact_buffer() { return exact_buffer_; }
+//   auto &get_lower_buffer() { return lower_buffer_; }
+
+// private:
+//   uint32_t k_;
+//   uint32_t predict_logical_bucket_id_;
+//   uint32_t logical_bucket_num_;
+//   uint32_t logical_threshold_bucket_id_;
+//   uint32_t physical_bucket_num_;
+//   uint32_t physical_threshold_bucket_id_;
+//   float lower_{}, upper_{}, delta_{};
+//   PORTABLE_ALIGN64 uint8_t *code_lut_;
+//   std::vector<PairIOBucket> bucketed_buffer_;
+//   std::vector<PairIOBucket> exact_buffer_;
+//   std::vector<PairIOBucket> lower_buffer_;
+// };
 
 static inline void prefetch_l1(const void *addr) {
 #if defined(__SSE2__)

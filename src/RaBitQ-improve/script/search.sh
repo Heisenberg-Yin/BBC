@@ -4,11 +4,11 @@ data='c4-10m'
 C=4096
 B=1024
 D=1024
-k=500
+k=20000
 
 # export ASAN_OPTIONS=allocator_may_return_null=1
 # -fsanitize=address,undefined -fno-omit-frame-pointer -g
-g++ -march=core-avx2 -Ofast -g -o ./bin/search_${data} ./src/search.cpp -I ./src/ -D BB=${B} -D DIM=${D} -D numC=${C} -D B_QUERY=4 -D FAST_SCAN
+g++ -march=core-avx2 -Ofast -fno-omit-frame-pointer -g -o ./bin/search_${data} ./src/search.cpp -I ./src/ -D BB=${B} -D DIM=${D} -D numC=${C} -D B_QUERY=4 -D FAST_SCAN
 
 result_path=./results
 mkdir ${result_path}

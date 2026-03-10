@@ -16,17 +16,18 @@ const int MAXK = 100;
 
 long double rotation_time = 0;
 extern uint32_t rerank_count;
+int num_cand = 2000000;
 
 template <uint32_t D, uint32_t B>
 void test(const Matrix<float> &Q, const Matrix<float> &RandQ,
-          const Matrix<unsigned> &G, const IVFRN<D, B> &ivf, int k) {
+          const Matrix<unsigned> &G, IVFRN<D, B> &ivf, int k) {
   float sys_t, usr_t, usr_t_sum = 0, total_time = 0, search_time = 0;
   struct rusage run_start, run_end;
 
   // ========================================================================
   // Search Parameter
   //   vector<int> nprobes = {};
-  vector<int> nprobes = {900};
+  vector<int> nprobes = {1000, 1500, 2500};
   //   for (int i = 10; i <= 100; i += 30)
   //     nprobes.push_back(i);
   // ========================================================================
@@ -42,8 +43,10 @@ void test(const Matrix<float> &Q, const Matrix<float> &RandQ,
     for (int i = 0; i < Q.n; i++) {
       upper_KNNs.reset();
       GetCurTime(&run_start);
-      std::vector<std::pair<float, uint32_t>> result_ids = ivf.improved_search(
-          Q.data + i * Q.d, RandQ.data + i * RandQ.d, k, nprobe, upper_KNNs);
+      std::vector<std::pair<float, uint32_t>> result_ids =
+          ivf.improved_search_on_disk(Q.data + i * Q.d,
+                                      RandQ.data + i * RandQ.d, k, nprobe,
+                                      upper_KNNs);
       GetCurTime(&run_end);
       GetTime(&run_start, &run_end, &usr_t, &sys_t);
       total_time += usr_t * 1e6;
@@ -69,13 +72,15 @@ void test(const Matrix<float> &Q, const Matrix<float> &RandQ,
         }
       }
       correct += tmp_correct;
+      // std::cerr << "Query " << i << " : " << tmp_correct << " / " << k
+      //           << std::endl;
     }
     float time_us_per_query = total_time / Q.n + rotation_time;
     float recall = 1.0f * correct / (Q.n * k);
     float average_ratio = total_ratio / (Q.n * k);
 
     cout << "------------------------------------------------" << endl;
-    cout << "nprobe = " << nprobe << " k = " << k << "num cand: " << num_cand
+    cout << "nprobe = " << nprobe << " k = " << k << " num cand: " << num_cand
          << endl;
     cout << "Recall = " << recall * 100.000 << "%\t"
          << "Ratio = " << average_ratio << endl;
@@ -168,7 +173,7 @@ int main(int argc, char *argv[]) {
   freopen(result_file_view, "a", stdout);
 
   IVFRN<DIM, BB> ivf;
-  ivf.load(index_path);
+  ivf.load_disk(index_path, num_cand);
 
   float sys_t, usr_t, usr_t_sum = 0, total_time = 0, search_time = 0;
   struct rusage run_start, run_end;

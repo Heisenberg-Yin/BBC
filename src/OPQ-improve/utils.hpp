@@ -2,8 +2,12 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <fcntl.h>
+#include <libaio.h>
+#include <liburing.h>
 #include <limits>
 #include <sstream>
+#include <unistd.h>
 #include <unordered_map>
 #include <vector>
 #include <x86intrin.h>
@@ -12,6 +16,365 @@
 #endif
 #define PORTABLE_ALIGN32 __attribute__((aligned(32)))
 #define PORTABLE_ALIGN64 __attribute__((aligned(64)))
+
+// 定义上下文结构，用于追踪每个 Bucket 的读取进度
+struct BucketContext {
+  float *buffer;
+  uint32_t completed_cnt;
+  uint32_t capability;
+  uint32_t dim; // 记录维度，方便内部偏移计算
+
+  BucketContext(uint32_t cap, uint32_t d)
+      : buffer(nullptr), capability(cap), dim(d), completed_cnt(0) {
+    size_t alignment = 4096;
+    size_t raw_bytes = 1ull * capability * dim * sizeof(float);
+
+    // 关键修正：确保 total_bytes 是 alignment 的倍数
+    size_t total_bytes = (raw_bytes + alignment - 1) & ~(alignment - 1);
+
+    buffer = static_cast<float *>(std::aligned_alloc(alignment, total_bytes));
+    if (!buffer) {
+      throw std::bad_alloc();
+    }
+    // 建议清零，避免脏数据
+    memset(buffer, 0, total_bytes);
+  }
+
+  // 增加析构函数防止泄露
+  ~BucketContext() {
+    if (buffer) {
+      free(buffer); // posix_memalign 分配的内存必须用 free 释放
+      buffer = nullptr;
+    }
+  }
+
+  // 提供一个辅助函数计算偏移量
+  float *get_vector_ptr(uint32_t idx) {
+    return buffer + (static_cast<size_t>(idx) * dim);
+  }
+
+  float *get_vector_ptr() { return buffer; }
+};
+
+class AsyncVectorMap {
+private:
+  int fd;
+  struct io_uring ring;
+  size_t D; // 向量维度
+  size_t record_size;
+  uint32_t pending_reqs = 0; // 当前在途（In-flight）的任务数
+  std::vector<uint32_t> to_fetch_ids;
+  uint32_t processed_idx;
+  uint32_t batch_size_ = 4096;
+  bool is_direct_io = false;
+
+public:
+  /**
+   * @param path 文件路径
+   * @param d 向量维度
+   * @param entries 队列深度（推荐 256, 512 或更高，取决于磁盘并行度）
+   */
+  AsyncVectorMap(const char *path, size_t d, unsigned n_cand,
+                 unsigned entries = 32768)
+      : D(d) {
+
+    record_size = D * sizeof(float);
+
+    if (record_size % 512 == 0) {
+      fd = open(path, O_RDONLY | O_DIRECT);
+      if (fd >= 0)
+        is_direct_io = true;
+    }
+
+    // 2. 如果 O_DIRECT 不可用或不支持，回退到普通 IO
+    if (fd < 0) {
+      fd = open(path, O_RDONLY);
+      is_direct_io = false;
+      if (fd < 0)
+        throw std::runtime_error("Open failed: " +
+                                 std::string(strerror(errno)));
+    }
+
+    std::cout << "[AsyncVectorMap] Mode: "
+              << (is_direct_io ? "O_DIRECT" : "Buffered IO") << std::endl;
+
+    // 3. 初始化 io_uring
+    if (io_uring_queue_init(entries, &ring, 0) < 0) {
+      close(fd);
+      throw std::runtime_error("io_uring_queue_init failed");
+    }
+
+    to_fetch_ids.reserve(2 * n_cand);
+    processed_idx = 0;
+  }
+
+  void reset() {
+    to_fetch_ids.clear();
+    processed_idx = 0;
+  }
+
+  uint32_t get_batch_size() { return batch_size_; }
+  uint32_t get_pending_reqs() { return pending_reqs; }
+  std::vector<uint32_t> &get_pending_ids() { return to_fetch_ids; }
+
+  /**
+   * 提交固定大小（batch_size_）的批次并等待完成
+   * @param ctx 包含缓冲区的上下文
+   */
+  void submit_fetch(BucketContext *ctx) {
+    // 1. 确定本批次的边界
+    uint32_t total_size = to_fetch_ids.size();
+    uint32_t submitted_this_run = 0;
+    while (processed_idx < total_size && submitted_this_run < batch_size_) {
+      struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+      if (!sqe) {
+        // 如果 SQ 满了，立刻提交，然后收割一部分 CQE 释放空间
+        io_uring_submit(&ring);
+        return; // 或者在这里做个等待
+      }
+      long long offset =
+          static_cast<long long>(to_fetch_ids[processed_idx]) * record_size;
+      float *dest = ctx->get_vector_ptr(processed_idx);
+      io_uring_prep_read(sqe, fd, dest, record_size, offset);
+      io_uring_sqe_set_data(sqe, ctx);
+
+      processed_idx++;
+      submitted_this_run++;
+      pending_reqs++;
+    }
+
+    // 3. 提交本批次的所有请求到内核
+    // 批量提交
+    if (submitted_this_run > 0) {
+      int ret = io_uring_submit(&ring);
+      if (ret < 0) {
+        fprintf(stderr, "io_uring_submit failed: %s\n", strerror(-ret));
+      }
+    }
+    // 4. 【关键】阻塞等待本批次的请求全部完成
+    // 这样可以确保函数返回时，这 batch_size_ 条数据已经写到了内存中
+    // wait_completions(current_batch_count);
+  }
+
+  void reap_completions() {
+    struct io_uring_cqe *cqe;
+    unsigned head;
+    uint32_t completed_count = 0;
+
+    io_uring_for_each_cqe(&ring, head, cqe) {
+      completed_count++;
+      // 关键：拿回的是 ctx 指针，而不是索引
+      BucketContext *ctx = (BucketContext *)io_uring_cqe_get_data(cqe);
+
+      if (cqe->res < 0) {
+        fprintf(stderr, "Read error: %s\n", strerror(-cqe->res));
+      } else {
+        // 增加该 Context 的完成计数
+        ctx->completed_cnt++;
+      }
+      pending_reqs--;
+    }
+    if (completed_count > 0)
+      io_uring_cq_advance(&ring, completed_count);
+    // std::cerr << "pending requests: " << pending_reqs << std::endl;
+  }
+
+  ~AsyncVectorMap() {
+    io_uring_queue_exit(&ring);
+    if (fd >= 0)
+      close(fd);
+  }
+};
+
+class AlignedSyncVectorMap {
+private:
+  int fd;
+  io_context_t ctx;
+  size_t D;
+  size_t record_size;
+  unsigned max_events; // 记录队列最大容量
+
+public:
+  // 修改：保存 max_ctx 到成员变量
+  AlignedSyncVectorMap(const char *path, size_t d, unsigned max_ctx = 4096)
+      : D(d), max_events(max_ctx) {
+
+    // 如果不用 O_DIRECT，libaio 经常会退化成同步阻塞，但兼容性更好。
+    // 如果追求极致性能且能处理对齐，建议加上 O_DIRECT。
+
+    record_size = D * sizeof(float);
+    bool is_direct_io = false;
+    if (record_size % 512 == 0) {
+      fd = open(path, O_RDONLY | O_DIRECT);
+      if (fd >= 0)
+        is_direct_io = true;
+    }
+
+    // 2. 如果 O_DIRECT 不可用或不支持，回退到普通 IO
+    if (fd < 0) {
+      fd = open(path, O_RDONLY);
+      is_direct_io = false;
+      if (fd < 0)
+        throw std::runtime_error("Open failed: " +
+                                 std::string(strerror(errno)));
+    }
+
+    std::cout << "[AsyncVectorMap] Mode: "
+              << (is_direct_io ? "O_DIRECT" : "Buffered IO") << std::endl;
+
+    ctx = 0;
+    if (io_setup(max_ctx, &ctx) != 0) {
+      perror("io_setup failed");
+      exit(-1);
+    }
+  }
+
+  void fetch_vectors(const std::vector<uint32_t> &ids, float *data_ptr) {
+    size_t total_n = ids.size();
+    if (total_n == 0)
+      return;
+
+    // 分批策略：每批次大小不能超过 max_events
+    // 建议设置为 1024 或 2048，留一点缓冲空间
+    const size_t BATCH_SIZE = std::min((size_t)max_events, (size_t)4096);
+
+    std::vector<struct iocb> cbs(BATCH_SIZE);
+    std::vector<struct iocb *> p_cbs(BATCH_SIZE);
+    std::vector<struct io_event> events(BATCH_SIZE);
+
+    size_t processed = 0;
+
+    while (processed < total_n) {
+      size_t current_batch_size = std::min(BATCH_SIZE, total_n - processed);
+
+      // 2. 准备 IOCB
+      for (size_t i = 0; i < current_batch_size; ++i) {
+        size_t idx = processed + i;
+        long long offset = (long long)ids[idx] * record_size;
+
+        void *target_buffer = data_ptr + (1ull * idx * D);
+
+        memset(&cbs[i], 0, sizeof(struct iocb));
+        io_prep_pread(&cbs[i], fd, target_buffer, D * sizeof(float), offset);
+        p_cbs[i] = &cbs[i];
+      }
+
+      int ret = io_submit(ctx, current_batch_size, p_cbs.data());
+
+      if (ret < 0) {
+        perror("io_submit failed"); // 可能是 -EAGAIN (队列满)
+        break;
+      }
+
+      int submitted_count = ret; // 实际提交成功的数量
+      int completed_so_far = 0;
+      while (completed_so_far < submitted_count) {
+        int wait_nr = submitted_count - completed_so_far;
+        int r = io_getevents(ctx, wait_nr, wait_nr, events.data(), nullptr);
+
+        if (r < 0) {
+          perror("io_getevents failed");
+          break;
+        }
+        completed_so_far += r;
+      }
+      processed += submitted_count;
+    }
+  }
+
+  ~AlignedSyncVectorMap() {
+    io_destroy(ctx);
+    close(fd);
+  }
+};
+
+class SyncVectorMap {
+private:
+  int fd;
+  io_context_t ctx;
+  size_t D;
+  size_t record_size;
+  unsigned max_events; // 记录队列最大容量
+
+public:
+  // 修改：保存 max_ctx 到成员变量
+  SyncVectorMap(const char *path, size_t d, unsigned max_ctx = 4096)
+      : D(d), max_events(max_ctx) {
+
+    // 如果不用 O_DIRECT，libaio 经常会退化成同步阻塞，但兼容性更好。
+    // 如果追求极致性能且能处理对齐，建议加上 O_DIRECT。
+    fd = open(path, O_RDONLY);
+    if (fd < 0) {
+      perror("Failed to open base file");
+      exit(-1);
+    }
+
+    record_size = sizeof(unsigned) + D * sizeof(float);
+    ctx = 0;
+    if (io_setup(max_ctx, &ctx) != 0) {
+      perror("io_setup failed");
+      exit(-1);
+    }
+  }
+
+  void fetch_vectors(const std::vector<uint32_t> &ids, float *data_ptr) {
+    size_t total_n = ids.size();
+    if (total_n == 0)
+      return;
+
+    // 分批策略：每批次大小不能超过 max_events
+    // 建议设置为 1024 或 2048，留一点缓冲空间
+    const size_t BATCH_SIZE = std::min((size_t)max_events, (size_t)4096);
+
+    std::vector<struct iocb> cbs(BATCH_SIZE);
+    std::vector<struct iocb *> p_cbs(BATCH_SIZE);
+    std::vector<struct io_event> events(BATCH_SIZE);
+
+    size_t processed = 0;
+
+    while (processed < total_n) {
+      size_t current_batch_size = std::min(BATCH_SIZE, total_n - processed);
+
+      // 2. 准备 IOCB
+      for (size_t i = 0; i < current_batch_size; ++i) {
+        size_t idx = processed + i;
+        long long offset = (long long)ids[idx] * record_size + sizeof(unsigned);
+
+        void *target_buffer = data_ptr + (1ull * idx * D);
+
+        memset(&cbs[i], 0, sizeof(struct iocb));
+        io_prep_pread(&cbs[i], fd, target_buffer, D * sizeof(float), offset);
+        p_cbs[i] = &cbs[i];
+      }
+
+      int ret = io_submit(ctx, current_batch_size, p_cbs.data());
+
+      if (ret < 0) {
+        perror("io_submit failed"); // 可能是 -EAGAIN (队列满)
+        break;
+      }
+
+      int submitted_count = ret; // 实际提交成功的数量
+      int completed_so_far = 0;
+      while (completed_so_far < submitted_count) {
+        int wait_nr = submitted_count - completed_so_far;
+        int r = io_getevents(ctx, wait_nr, wait_nr, events.data(), nullptr);
+
+        if (r < 0) {
+          perror("io_getevents failed");
+          break;
+        }
+        completed_so_far += r;
+      }
+      processed += submitted_count;
+    }
+  }
+
+  ~SyncVectorMap() {
+    io_destroy(ctx);
+    close(fd);
+  }
+};
 
 constexpr size_t div_round_up(size_t val, size_t div) {
   return (val / div) + static_cast<size_t>((val % div) != 0);
@@ -282,8 +645,13 @@ struct PairBucket {
   std::size_t size() const { return val.size(); }
   bool empty() const { return val.empty(); }
 
+  // --- 获取 const 指针 (用于只读场景) ---
   const float *val_data() const { return val.data(); }
   const uint32_t *idx_data() const { return idx.data(); }
+
+  // 也可以直接提供简单的获取函数名
+  float *data_val() { return val.data(); }
+  uint32_t *data_idx() { return idx.data(); }
 
   void free_memory() {
     val.clear();
@@ -419,6 +787,265 @@ private:
   std::vector<PairBucket> bucketed_buffer_;
   std::vector<PairBucket> exact_buffer_;
 };
+
+class AsyTopKBufferSoA {
+public:
+  AsyTopKBufferSoA(uint32_t k,                   // top-k
+                   uint32_t physical_bucket_num, // 物理桶数
+                   uint32_t logical_bucket_num)  // 桶数
+      : k_(k), physical_bucket_num_(physical_bucket_num),
+        logical_bucket_num_(logical_bucket_num) {
+    bucketed_buffer_.resize(physical_bucket_num_);
+    exact_buffer_.resize(physical_bucket_num_);
+    code_lut_ = new PORTABLE_ALIGN64 uint8_t[logical_bucket_num_];
+    processed_indices_.resize(physical_bucket_num_, 0);
+    for (uint32_t i = 0; i < physical_bucket_num_; ++i) {
+      bucketed_buffer_[i].reserve(k_ * 5);
+      exact_buffer_[i].reserve(k_ * 5);
+    }
+    logical_threshold_bucket_id_ = logical_bucket_num_;   // 最右桶
+    physical_threshold_bucket_id_ = physical_bucket_num_; // 最右桶
+  }
+
+  uint8_t *get_code_lut() { return code_lut_; }
+
+  void set_bounds(float lowest, float upper, float delta) // ← 多一个阈值数组
+  {
+    lower_ = lowest;
+    upper_ = upper;
+    delta_ = delta;
+    logical_threshold_bucket_id_ = 1e7;                   // 最右桶
+    physical_threshold_bucket_id_ = physical_bucket_num_; // 最右桶
+  }
+
+  inline void push(uint32_t b_logical, float lb, uint32_t id) {
+    const uint32_t b = code_lut_[b_logical]; // physical bucket id
+    PairBucket &bucket = bucketed_buffer_[b];
+    bucket.emplace(lb, id);
+  }
+
+  inline void push_exact(uint32_t b_logical, float lb, uint32_t id) {
+    const uint32_t b = code_lut_[b_logical]; // physical bucket id
+    PairBucket &bucket = exact_buffer_[b];
+    bucket.emplace(lb, id);
+  }
+
+  //   void reset() {
+  //     for (auto &B : bucketed_buffer_)
+  //       B.clear();
+  //     for (auto &B : exact_buffer_)
+  //       B.clear();
+  //     logical_threshold_bucket_id_ = 1e7;
+  //     physical_threshold_bucket_id_ = physical_bucket_num_; // 最右桶
+  //     predict_logical_bucket_id_ = 0;
+  //   }
+
+  void reset() {
+    for (auto &B : bucketed_buffer_)
+      B.clear();
+    for (auto &B : exact_buffer_)
+      B.clear();
+    // 重置所有进度索引
+    std::fill(processed_indices_.begin(), processed_indices_.end(), 0);
+    logical_threshold_bucket_id_ = 1e7;
+    physical_threshold_bucket_id_ = physical_bucket_num_;
+    predict_logical_bucket_id_ = 0;
+  }
+
+  void update_th_code(int visited_cluster_num, int nprobe,
+                      AsyncVectorMap *as_v_map, BucketContext *bucket_context) {
+    // std::vector<uint32_t> &to_fetch_ids = as_v_map->get_pending_ids();
+    uint32_t acc = 0;
+    uint32_t j = 0;
+    float sample_ratio = (1.0 * visited_cluster_num) / nprobe;
+    uint32_t threshold = std::max(1u, static_cast<uint32_t>(sample_ratio * k_));
+    bool update_flag = true;
+    // uint32_t batch_size = as_v_map->get_batch_size();
+    // uint32_t current_processed = 0;
+
+    for (uint32_t i = 0; i < physical_bucket_num_; ++i) {
+      // while (processed_indices_[i] < bucketed_buffer_[i].size() &&
+      //        current_processed < batch_size) {
+      //   to_fetch_ids.push_back(bucketed_buffer_[i].idx_data()[processed_indices_[i]]);
+      //   processed_indices_[i]++;
+      //   current_processed++;
+      // }
+
+      acc += static_cast<uint32_t>(bucketed_buffer_[i].size()) +
+             static_cast<uint32_t>(exact_buffer_[i].size());
+
+      while (j < logical_bucket_num_ && code_lut_[j] == i) {
+        ++j;
+      }
+
+      if (update_flag) {
+        if (acc >= threshold) {
+          predict_logical_bucket_id_ = j;
+          update_flag = false;
+        }
+      }
+
+      if (acc >= k_) {                         // 一旦达到 k_
+        logical_threshold_bucket_id_ = j;      // 当前 pseudo id 即阈值
+        physical_threshold_bucket_id_ = i + 1; // 当前物理桶 id
+        predict_logical_bucket_id_ =
+            std::min(predict_logical_bucket_id_, logical_threshold_bucket_id_);
+        // if (current_processed > 0) {
+        //   as_v_map->submit_fetch(bucket_context);
+        //   // 顺便收割一下，防止 CQ 队列满导致的卡顿
+        // }
+        // as_v_map->reap_completions();
+        return;
+      }
+    }
+    logical_threshold_bucket_id_ = 1e7;
+    physical_threshold_bucket_id_ = physical_bucket_num_; // 最右桶
+    predict_logical_bucket_id_ =
+        std::min(logical_threshold_bucket_id_, predict_logical_bucket_id_);
+    // if (current_processed > 0) {
+    //   as_v_map->submit_fetch(bucket_context);
+    //   // 顺便收割一下，防止 CQ 队列满导致的卡顿
+    // }
+    // as_v_map->reap_completions();
+  }
+
+  uint32_t get_logical_bucket_num() const { return logical_bucket_num_; }
+  uint32_t get_physical_bucket_num() const { return physical_bucket_num_; }
+  uint32_t get_logical_threshold_bucket_id() const {
+    return logical_threshold_bucket_id_;
+  }
+  uint32_t get_physical_threshold_bucket_id() const {
+    return physical_threshold_bucket_id_;
+  }
+  uint32_t get_predict_logical_bucket_id() const {
+    return predict_logical_bucket_id_;
+  }
+  uint32_t get_predict_physical_bucket_id() const {
+    return code_lut_[predict_logical_bucket_id_];
+  }
+
+  void set_predict_logical_bucket_id(uint32_t id) {
+    predict_logical_bucket_id_ = id;
+  }
+
+  float get_delta() const { return delta_; }
+  float get_lower() const { return lower_; }
+  float get_upper() const { return upper_; }
+
+  auto &get_buffer() { return bucketed_buffer_; }
+  auto &get_exact_buffer() { return exact_buffer_; }
+
+private:
+  uint32_t k_;
+  uint32_t predict_logical_bucket_id_;
+  uint32_t logical_bucket_num_;
+  uint32_t logical_threshold_bucket_id_;
+  uint32_t physical_bucket_num_;
+  uint32_t physical_threshold_bucket_id_;
+  uint32_t batch_size_ = 512; // 每次异步读取的数量
+  float lower_{}, upper_{}, delta_{};
+  PORTABLE_ALIGN64 uint8_t *code_lut_;
+  std::vector<PairBucket> bucketed_buffer_;
+  std::vector<PairBucket> exact_buffer_;
+  std::vector<uint32_t> processed_indices_;
+};
+// class AIOTopKBufferSoA {
+// public:
+//   AIOTopKBufferSoA(uint32_t k, uint32_t phys_n, uint32_t log_n, int fd)
+//       : k_(k), physical_bucket_num_(phys_n), logical_bucket_num_(log_n),
+//         fd_(fd) {
+//     // fd_ file document name
+//     // 初始化 libaio
+//     io_setup(1024, &aio_ctx_);
+
+//     // 状态追踪
+//     is_loading_.resize(physical_bucket_num_, false);
+//     is_ready_.resize(physical_bucket_num_, false);
+
+//     // 为每个物理桶分配对齐内存 (假设桶大小固定)
+//     bucket_buffers_.resize(physical_bucket_num_);
+//     for (uint32_t i = 0; i < physical_bucket_num_; ++i) {
+//       bucket_buffers_[i] = (uint8_t *)aligned_alloc(MAX_BUCKET_BYTES);
+//     }
+
+//     code_lut_ = new uint8_t[logical_bucket_num_];
+//     // ... 其他初始化 ...
+//   }
+
+//   // 关键逻辑：根据最新的阈值，读取所有需要的桶
+//   void trigger_reads_by_threshold() {
+//     // 获取当前逻辑阈值
+//     uint32_t th_log = logical_threshold_bucket_id_;
+
+//     // 遍历所有逻辑桶，直到阈值位置
+//     for (uint32_t j = 0; j <= th_log && j < logical_bucket_num_; ++j) {
+//       uint32_t b_phys = code_lut_[j];
+
+//       // 如果该物理桶还没加载，且没在加载中，则发起 AIO 读
+//       if (!is_ready_[b_phys] && !is_loading_[b_phys]) {
+//         submit_aio_read(b_phys);
+//       }
+//     }
+//   }
+
+//   void submit_aio_read(uint32_t b_phys) {
+//     struct iocb *cb = new iocb; // 生产环境建议用池化
+//     // 假设每个桶在文件中的偏移是固定的
+//     long long offset = (long long)b_phys * MAX_BUCKET_BYTES;
+
+//     io_prep_pread(cb, fd_, bucket_buffers_[b_phys], MAX_BUCKET_BYTES,
+//     offset); cb->data = (void *)(uintptr_t)b_phys; // 回传物理 ID
+
+//     if (io_submit(aio_ctx_, 1, &cb) == 1) {
+//       is_loading_[b_phys] = true;
+//     } else {
+//       delete cb;
+//     }
+//   }
+
+//   // 非阻塞轮询 IO 完成情况
+//   void poll_io() {
+//     struct io_event events[32];
+//     struct timespec timeout = {0, 0}; // 立即返回
+//     int num = io_getevents(aio_ctx_, 0, 32, events, &timeout);
+
+//     for (int i = 0; i < num; ++i) {
+//       uint32_t b_phys = (uint32_t)(uintptr_t)events[i].data;
+//       is_loading_[b_phys] = false;
+//       is_ready_[b_phys] = true;
+//       delete (struct iocb *)events[i].obj;
+//     }
+//   }
+
+//   // 修改原有的 update_th_code，在末尾加入触发逻辑
+//   void update_th_code(int visited_cluster_num, int nprobe) {
+//     // ... 原有的逻辑，计算出新的 logical_threshold_bucket_id_ ...
+
+//     // 重点：计算完阈值后，立即触发 IO
+//     trigger_reads_by_threshold();
+//     // 顺便检查一下之前发起的读有没有完工的
+//     poll_io();
+//   }
+
+//   // 检查某个逻辑桶的数据是否已经 Ready，可以进行精确计算了
+//   bool is_bucket_accessible(uint32_t b_logical) {
+//     uint32_t b_phys = code_lut_[b_logical];
+//     return is_ready_[b_phys];
+//   }
+
+// private:
+//   io_context_t aio_ctx_;
+//   int fd_;
+//   const size_t MAX_BUCKET_BYTES = 65536; // 64KB 对齐读取
+
+//   std::vector<PairBucket> bucketed_buffer_;
+//   std::vector<bool> is_loading_;
+//   std::vector<bool> is_ready_;
+
+//   uint32_t k_, logical_bucket_num_, physical_bucket_num_;
+//   uint32_t logical_threshold_bucket_id_;
+//   uint8_t *code_lut_;
+// };
 
 inline void accumulate_one_block(uint8_t *codes, uint8_t *LUT, uint16_t *result,
                                  unsigned dim) {

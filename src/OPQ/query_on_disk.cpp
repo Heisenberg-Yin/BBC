@@ -10,6 +10,7 @@
 
 using namespace std;
 long double rotation_time = 0;
+int num_cand = 1500000;
 
 void test(const Matrix<float> &Q, const Matrix<float> &RandQ,
           const Matrix<unsigned> &G, IVF_PQFastScan &ivf, int k) {
@@ -17,11 +18,10 @@ void test(const Matrix<float> &Q, const Matrix<float> &RandQ,
   struct rusage run_start, run_end;
   // ========================================================================
   // Search Parameter
-  vector<int> nprobes = {600};
+  vector<int> nprobes = {200, 500, 1500, 2500, 3500};
   //   for (int i = 10; i <= 320; i += 30)
   //     nprobes.push_back(i);
 
-  int num_cand = 50000;
   for (auto nprobe : nprobes) {
     float total_time = 0;
     float total_ratio = 0;
@@ -123,7 +123,7 @@ int main(int argc, char *argv[]) {
   std::cerr << "queryk: " << queryk << std::endl;
 
   char rotated_path[256] = "";
-  sprintf(rotated_path, "./data/rotation_%s.fvecs", dataset);
+  sprintf(rotated_path, "%srotation_%s.fvecs", source, dataset);
   Matrix<float> opq(rotated_path);
 
   char query_path[256] = "";
@@ -135,7 +135,7 @@ int main(int argc, char *argv[]) {
   Matrix<unsigned> G(groundtruth_path);
 
   char index_path[256];
-  sprintf(index_path, "./data/ivfpq_%s.index", dataset);
+  sprintf(index_path, "%sivfpq_%s.index", source, dataset);
 
   float sys_t, usr_t, usr_t_sum = 0, total_time = 0, search_time = 0;
   struct rusage run_start, run_end;
@@ -149,7 +149,7 @@ int main(int argc, char *argv[]) {
   rotation_time = usr_t * 1e6 / query.n;
 
   IVF_PQFastScan ivfpq;
-  ivfpq.load(index_path);
+  ivfpq.load_disk(index_path, num_cand);
 
   ivfpq.rotate_centroid(opq);
 

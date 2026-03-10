@@ -11,7 +11,10 @@
 #include "memory.h"
 #include "space.h"
 #include "utils.h"
+#include "x86simdsort.h"
 #include <algorithm>
+#include <cstdlib> // 控制 posix_memalign
+#include <cstring> // 控制 memset
 #include <map>
 #include <queue>
 #include <vector>
@@ -53,6 +56,7 @@ public:
   float *x0;       // N of floats in the Random Net algorithm
   float *centroid; // N * B floats (not N * D), note that the centroids should
                    // be randomized
+  AsyncVectorMap *v_map = nullptr;
 
   IVFRN();
   IVFRN(const Matrix<float> &X, const Matrix<float> &_centroids,
@@ -64,9 +68,19 @@ public:
   improved_search(float *query, float *rd_query, uint32_t k, uint32_t nprobe,
                   TopKBufferSoA &upper_KNNs) const;
 
+  std::vector<std::pair<float, uint32_t>>
+  improved_search_on_disk(float *query, float *rd_query, uint32_t k,
+                          uint32_t nprobe, TopKBufferSoA &upper_KNNs);
+
   inline void rerank(float *query, float *data, uint32_t k,
                      TopKBufferSoA &upper_KNNs,
                      std::vector<std::pair<float, uint32_t>> &KNNs) const;
+
+  inline void load_candidate_from_disk(TopKBufferSoA &KNNs, unsigned k);
+
+  inline void rerank_with_io(float *query, float *data, uint32_t k,
+                             TopKBufferSoA &upper_KNNs,
+                             std::vector<std::pair<float, uint32_t>> &KNNs);
 
   inline void
   build_codebook_from_samples(std::vector<ProbeInfo<B>> &probe_infos,
@@ -95,6 +109,7 @@ public:
 
   void save(char *filename);
   void load(char *filename);
+  void load_disk(char *filename, unsigned num_cand);
 };
 
 template <uint32_t D, uint32_t B>
@@ -128,7 +143,8 @@ void IVFRN<D, B>::build_codebook_from_samples(
   }
 
   if (offset > k) {
-    std::nth_element(sampled_dist, sampled_dist + k, sampled_dist + offset);
+    // std::nth_element(sampled_dist, sampled_dist + k, sampled_dist + offset);
+    x86simdsort::qselect(sampled_dist, k, offset, true);
     global_max_dist = sampled_dist[k - 1];
     offset = k;
   }
@@ -426,6 +442,298 @@ void IVFRN<D, B>::rerank(float *query, float *data, uint32_t k,
 }
 
 template <uint32_t D, uint32_t B>
+void IVFRN<D, B>::load_candidate_from_disk(TopKBufferSoA &KNNs, unsigned k) {
+  std::vector<uint32_t> candidate_ids;
+  // 启发式预留空间，防止频繁扩容
+  candidate_ids.reserve(k * 100);
+
+  // 封装 ID 转换逻辑，避免重复代码
+  auto process_bucket = [&](auto &bucket) {
+    int sz = bucket.size();
+    if (sz == 0)
+      return;
+
+    // 获取非 const 指针以便修改原始数据
+    uint32_t *id_ptr = bucket.data_idx();
+    for (int j = 0; j < sz; ++j) {
+      // 假设 id 是成员变量，存储的是映射关系
+      uint32_t global_id = id[id_ptr[j]];
+      candidate_ids.emplace_back(global_id);
+      // 将 bucket 内的局部偏移替换为全局 ID
+      id_ptr[j] = global_id;
+    }
+  };
+
+  uint32_t threshold_bucket = KNNs.get_physical_threshold_bucket_id();
+  auto &buffers = KNNs.get_buffer();
+  auto &lower_buffers = KNNs.get_lower_buffer();
+
+  for (uint32_t i = 0; i <= threshold_bucket; ++i) {
+    // 分别处理两个 buffer 层，不再相互覆盖
+    process_bucket(buffers[i]);
+    process_bucket(lower_buffers[i]);
+  }
+
+  // 在批量读取前，对 ID 进行排序和去重通常能大幅提升磁盘 I/O 效率
+  //   std::sort(candidate_ids.begin(), candidate_ids.end());
+  v_map->fetch_to_cache(candidate_ids);
+  //   for (uint32_t i = 0; i <= KNNs.get_physical_threshold_bucket_id(); ++i) {
+  //     auto &bucket = KNNs.get_buffer()[i];
+  //     int j = 0;
+  //     int sz = bucket.size();
+  //     const uint32_t *id_ptr = bucket.idx_data();
+  //     while (j < sz) {
+  //       candidate_ids.emplace_back(*(id + (id_ptr[j])));
+  //       id_ptr[j] = *(id + (id_ptr[j]));
+  //       j++;
+  //     }
+  //     bucket = KNNs.get_lower_buffer()[i];
+  //     j = 0;
+  //     sz = bucket.size();
+  //     id_ptr = bucket.idx_data();
+  //     while (j < sz) {
+  //       candidate_ids.emplace_back(*(id + (id_ptr[j])));
+  //       id_ptr[j] = *(id + (id_ptr[j]));
+  //       j++;
+  //     }
+  //   }
+  //   v_map->fetch_to_cache(candidate_ids);
+}
+
+template <uint32_t D, uint32_t B>
+void IVFRN<D, B>::rerank_with_io(
+    float *query, float *data, uint32_t k, TopKBufferSoA &upper_KNNs,
+    std::vector<std::pair<float, uint32_t>> &KNNs) {
+
+  const int num_buckets = upper_KNNs.get_physical_bucket_num();
+  int th_code = upper_KNNs.get_physical_threshold_bucket_id();
+
+  const float delta = upper_KNNs.get_delta();
+  const float lowest = upper_KNNs.get_lower();
+  const float inv_delta = 1.0f / delta;
+  constexpr size_t CL = (D * sizeof(float) + 63) / 64;
+
+  // Move entries from upper buckets to lower
+  for (int i = th_code; i < num_buckets; ++i) {
+    auto &bucket = upper_KNNs.get_buffer()[i];
+    const float *lb_ptr = bucket.val_data();
+    const uint32_t *id_ptr = bucket.idx_data();
+    const uint32_t sz = bucket.size();
+
+    for (uint32_t j = 0; j < sz; ++j) {
+      int lb_code =
+          std::clamp(static_cast<int>((*lb_ptr - lowest) * inv_delta), 0, 255);
+      upper_KNNs.push_lower(lb_code, *lb_ptr, *id_ptr);
+      ++lb_ptr;
+      ++id_ptr;
+    }
+    bucket.clear();
+  }
+
+  load_candidate_from_disk(upper_KNNs, k);
+
+  //   clear above
+
+  int lower_idx = 0;
+  int upper_idx = upper_KNNs.get_physical_threshold_bucket_id() - 1;
+
+  while (upper_idx > lower_idx) {
+    // Process upper buckets
+    auto process_bucket = [&](auto &bucket) {
+      const uint32_t sz = bucket.size();
+      const uint32_t *id_ptr = bucket.idx_data();
+      if (sz != 0)
+        memory::mem_prefetch_l1(
+            reinterpret_cast<const char *>(v_map->get_vector(id_ptr[0])), CL);
+      for (uint32_t t = 0; t < sz; ++t) {
+        if (t + 1 < sz) {
+          memory::mem_prefetch_l1(
+              reinterpret_cast<const char *>(v_map->get_vector(id_ptr[t + 1])),
+              CL);
+        }
+        float dist = sqr_dist<D>(query, v_map->get_vector(id_ptr[t]));
+        rerank_count++;
+        int code =
+            std::clamp(static_cast<int>((dist - lowest) * inv_delta), 0, 255);
+        upper_KNNs.push_exact(code, dist, id_ptr[t]);
+      }
+      bucket.clear();
+    };
+    process_bucket(upper_KNNs.get_buffer()[upper_idx]);
+    process_bucket(upper_KNNs.get_lower_buffer()[lower_idx]);
+
+    upper_KNNs.update_th_code();
+    int new_th_code = upper_KNNs.get_physical_threshold_bucket_id();
+    int new_lg_th_code = upper_KNNs.get_logical_threshold_bucket_id();
+    // Move intermediate buckets into lower buffer
+    for (int t = new_th_code; t < th_code; ++t) {
+      auto &bucket = upper_KNNs.get_buffer()[t];
+      const uint32_t sz = bucket.size();
+      const uint32_t *id_ptr = bucket.idx_data();
+      const float *data_ptr = bucket.val_data();
+
+      for (uint32_t ti = 0; ti < sz; ++ti) {
+        int code = std::clamp(
+            static_cast<int>((data_ptr[ti] - lowest) * inv_delta), 0, 255);
+        if (code < new_lg_th_code)
+          upper_KNNs.push_lower(code, data_ptr[ti], id_ptr[ti]);
+      }
+      bucket.clear();
+    }
+
+    th_code = new_th_code;
+    upper_idx = th_code - 1;
+
+    lower_idx = 0;
+    while (lower_idx < upper_idx &&
+           upper_KNNs.get_lower_buffer()[lower_idx].size() == 0) {
+      ++lower_idx;
+    }
+  }
+
+  auto collect_bucket = [&](auto &bucket) {
+    const uint32_t sz = bucket.size();
+    const uint32_t *id_ptr = bucket.idx_data();
+    const float *val_ptr = bucket.val_data();
+    for (uint32_t i = 0; i < sz; ++i) {
+      KNNs.emplace_back(val_ptr[i], id_ptr[i]);
+    }
+  };
+
+  // 3. Collect final results
+  for (int idx = 0; idx < upper_idx; ++idx) {
+    collect_bucket(upper_KNNs.get_buffer()[idx]);
+    collect_bucket(upper_KNNs.get_exact_buffer()[idx]);
+  }
+  // 4. Special case for last bucket
+  // collect_bucket(upper_KNNs.get_buffer()[upper_idx]);
+
+  int remaining_size = k - static_cast<int>(KNNs.size());
+
+  if (remaining_size > 0) {
+    MaxHeap<float, unsigned> tempres;
+    float distK = std::numeric_limits<float>::max();
+    auto &ex_bucket = upper_KNNs.get_exact_buffer()[upper_idx];
+    const float *data_ptr = ex_bucket.val_data();
+    const uint32_t *id_ptr = ex_bucket.idx_data();
+    for (uint32_t j = 0; j < ex_bucket.size(); ++j) {
+      if (data_ptr[j] < distK) {
+        tempres.push(data_ptr[j], id_ptr[j]);
+        if (tempres.size() > remaining_size)
+          tempres.pop();
+        if (tempres.size() == remaining_size)
+          distK = tempres.top_key();
+      }
+    }
+
+    // MaxHeap<float, unsigned> candidate;
+    // auto &upper_bucket = upper_KNNs.get_buffer()[upper_idx];
+    // data_ptr = upper_bucket.val_data();
+    // id_ptr = upper_bucket.idx_data();
+    // if (upper_bucket.size() > 0) {
+    //   for (uint32_t j = 0; j < upper_bucket.size(); ++j) {
+    //     if (data_ptr[j] < distK)
+    //       candidate.push_unsorted(-data_ptr[j], id_ptr[j]);
+    //   }
+    // }
+    // auto &low_bucket = upper_KNNs.get_lower_buffer()[lower_idx];
+    // data_ptr = low_bucket.val_data();
+    // id_ptr = low_bucket.idx_data();
+    // if (low_bucket.size() > 0) {
+    //   for (uint32_t j = 0; j < low_bucket.size(); ++j) {
+    //     if (data_ptr[j] < distK)
+    //       candidate.push_unsorted(-data_ptr[j], id_ptr[j]);
+    //   }
+    // }
+
+    // memory::mem_prefetch_l1(
+    //     reinterpret_cast<const char *>(data + 1ull * candidate.top_data() *
+    //     D), CL);
+
+    // while ((!candidate.empty()) && (candidate.top_key() + distK > 0)) {
+    //   unsigned id = candidate.top_data();
+    //   candidate.pop();
+    //   if (!candidate.empty()) {
+    //     unsigned next_id = candidate.top_data();
+    //     memory::mem_prefetch_l1(
+    //         reinterpret_cast<const char *>(data + 1ull * next_id * D), CL);
+    //   }
+    //   float dist = sqr_dist<D>(query, data + 1ull * id * D);
+    //   rerank_count++;
+    //   if (dist < distK) {
+    //     tempres.push(dist, id);
+    //     if (tempres.size() > remaining_size)
+    //       tempres.pop();
+    //     if (tempres.size() == remaining_size)
+    //       distK = tempres.top_key();
+    //   }
+    // }
+
+    auto &upper_bucket = upper_KNNs.get_buffer()[upper_idx];
+    data_ptr = upper_bucket.val_data();
+    id_ptr = upper_bucket.idx_data();
+    if (upper_bucket.size() > 0) {
+      memory::mem_prefetch_l1(
+          reinterpret_cast<const char *>(v_map->get_vector(id_ptr[0])), CL);
+      for (uint32_t j = 0; j < upper_bucket.size(); ++j) {
+        if (j + 1 < upper_bucket.size()) {
+          memory::mem_prefetch_l1(
+              reinterpret_cast<const char *>(v_map->get_vector(id_ptr[j + 1])),
+              CL);
+        }
+        if (data_ptr[j] < distK) {
+          float dist = sqr_dist<D>(query, v_map->get_vector(id_ptr[j]));
+          rerank_count++;
+
+          if (dist < distK) {
+            tempres.push(dist, id_ptr[j]);
+            if (tempres.size() > remaining_size) {
+              tempres.pop();
+            }
+            if (tempres.size() == remaining_size) {
+              distK = tempres.top_key();
+            }
+          }
+        }
+      }
+    }
+
+    auto &low_bucket = upper_KNNs.get_lower_buffer()[lower_idx];
+    data_ptr = low_bucket.val_data();
+    id_ptr = low_bucket.idx_data();
+    if (low_bucket.size() > 0) {
+      memory::mem_prefetch_l1(
+          reinterpret_cast<const char *>(v_map->get_vector(id_ptr[0])), CL);
+      for (uint32_t j = 0; j < low_bucket.size(); ++j) {
+        if (j + 1 < low_bucket.size()) {
+          memory::mem_prefetch_l1(
+              reinterpret_cast<const char *>(v_map->get_vector(id_ptr[j + 1])),
+              CL);
+        }
+        if (data_ptr[j] < distK) {
+          float dist = sqr_dist<D>(query, v_map->get_vector(id_ptr[j]));
+          rerank_count++;
+          if (dist < distK) {
+            tempres.push(dist, id_ptr[j]);
+            if (tempres.size() > remaining_size) {
+              tempres.pop();
+            }
+            if (tempres.size() == remaining_size) {
+              distK = tempres.top_key();
+            }
+          }
+        }
+      }
+    }
+
+    auto &data = tempres.get_data();
+    for (uint32_t j = 0; j < data.size(); j++) {
+      KNNs.emplace_back(data[j].key, data[j].data);
+    }
+  }
+}
+
+template <uint32_t D, uint32_t B>
 void IVFRN<D, B>::sample_bound_fast_scan(
     float *sample_dist, float &samllest_dist, float &largest_dist,
     const uint8_t *LUT, const uint8_t *packed_code, uint32_t len,
@@ -518,6 +826,74 @@ void IVFRN<D, B>::sample_bound_fast_scan(
 }
 
 // search impl
+template <uint32_t D, uint32_t B>
+std::vector<std::pair<float, uint32_t>>
+IVFRN<D, B>::improved_search_on_disk(float *query, float *rd_query, uint32_t k,
+                                     uint32_t nprobe,
+                                     TopKBufferSoA &upper_KNNs) {
+  // The default value of distK is +inf
+  std::vector<std::pair<float, uint32_t>> KNNs;
+  KNNs.reserve(k);
+  v_map->reset();
+  Result centroid_dist[numC];
+  float *ptr_c = centroid;
+  for (int i = 0; i < C; i++) {
+    centroid_dist[i].first = sqr_dist<B>(rd_query, ptr_c);
+    centroid_dist[i].second = i;
+    ptr_c += B;
+    rerank_count += 1;
+  }
+  std::partial_sort(centroid_dist, centroid_dist + nprobe,
+                    centroid_dist + numC);
+
+  uint8_t PORTABLE_ALIGN64 byte_query[B];
+
+  std::vector<ProbeInfo<B>> probe_infos(nprobe); // 存储每个 pb 的信息
+  Result *ptr_centroid_dist = (&centroid_dist[0]);
+  // ===========================================================================================================
+  // Scan the first nprobe clusters.
+  for (int pb = 0; pb < nprobe; pb++) {
+    uint32_t c = ptr_centroid_dist->second;
+    float sqr_y = ptr_centroid_dist->first;
+    ptr_centroid_dist++;
+    float vl, vr;
+    space.range(rd_query, centroid + c * B, vl, vr);
+    float width = (vr - vl) / ((1 << B_QUERY) - 1);
+    uint32_t sum_q = 0;
+    space.quantize(byte_query, rd_query, centroid + c * B, u, vl, width, sum_q);
+    ProbeInfo<B> &info = probe_infos[pb];
+    info.sqr_y = sqr_y;
+    info.vl = vl;
+    info.width = width;
+    info.sum_q = sum_q;
+    info.cluster_id = c;
+#if defined(FAST_SCAN) // Look-Up-Table Representation
+    pack_LUT<B>(byte_query, info.LUT);
+    for (int i = 0; i < B / 4 * 16; i++)
+      info.LUT[i] <<= 1;
+#endif
+  }
+
+  build_codebook_from_samples(probe_infos, nprobe, k, upper_KNNs);
+
+  for (int pb = 0; pb < nprobe; pb++) {
+    ProbeInfo<B> &info = probe_infos[pb];
+    uint32_t c = info.cluster_id;
+    float *ptr_data = data + 1ull * D * start[c];
+#if defined(FAST_SCAN)
+    bound_fast_scan(upper_KNNs, query, ptr_data, k, info.LUT,
+                    packed_code + packed_start[c], len[c], sqr_x + start[c],
+                    factor_ip + start[c], factor_ppc + start[c],
+                    error + start[c], info.sqr_y, info.vl, info.width,
+                    info.sum_q, start[c]);
+#endif
+    upper_KNNs.update_th_code();
+  }
+
+  rerank_with_io(query, data, k, upper_KNNs, KNNs);
+  return KNNs;
+}
+
 template <uint32_t D, uint32_t B>
 std::vector<std::pair<float, uint32_t>>
 IVFRN<D, B>::improved_search(float *query, float *rd_query, uint32_t k,
@@ -733,7 +1109,6 @@ void IVFRN<D, B>::bound_fast_scan(
       ptr_upper_code += 8;
       ptr_lower_code += 8;
       idx += 8;
-      ptr_data += D * 8;
     }
   }
 
@@ -817,7 +1192,6 @@ void IVFRN<D, B>::bound_fast_scan(
       ptr_upper_code++;
       ptr_lower_code++;
       idx += 1;
-      ptr_data += D;
     }
   }
 }
@@ -942,6 +1316,106 @@ template <uint32_t D, uint32_t B> void IVFRN<D, B>::load(char *filename) {
     factor_ip[i] = -2 / fac_norm * x_x0;
   }
   input.close();
+  std::cerr << "IVFRN data loaded." << std::endl;
+}
+
+// load impl
+template <uint32_t D, uint32_t B>
+void IVFRN<D, B>::load_disk(char *filename, uint32_t num_cand) {
+  std::ifstream input(filename, std::ios::binary);
+
+  if (!input.is_open())
+    throw std::runtime_error("Cannot open file");
+
+  uint32_t d;
+  uint32_t b;
+  input.read((char *)&N, sizeof(uint32_t));
+  input.read((char *)&d, sizeof(uint32_t));
+  input.read((char *)&C, sizeof(uint32_t));
+  input.read((char *)&b, sizeof(uint32_t));
+
+  std::cerr << d << std::endl;
+  assert(d == D);
+  assert(b == B);
+
+  u = new float[B];
+#if defined(RANDOM_QUERY_QUANTIZATION)
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_real_distribution<> uniform(0.0, 1.0);
+  for (int i = 0; i < B; i++)
+    u[i] = uniform(gen);
+#else
+  for (int i = 0; i < B; i++)
+    u[i] = 0.5;
+#endif
+
+  centroid = new float[C * B];
+  // data = new float[1ull * N * D];
+  //   data = static_cast<float *>(aligned_alloc(
+  //       64, round_up_to_multiple(1ull * N * D * sizeof(float), 64)));
+
+  size_t alloc_size =
+      round_up_to_multiple(1ull * N * B / 64 * sizeof(uint64_t), 256);
+  binary_code = static_cast<uint64_t *>(aligned_alloc(256, alloc_size));
+
+  start = new uint32_t[C];
+  len = new uint32_t[C];
+  id = static_cast<uint32_t *>(
+      aligned_alloc(32, round_up_to_multiple(N * sizeof(uint32_t), 32)));
+  dist_to_c = static_cast<float *>(
+      aligned_alloc(32, round_up_to_multiple(N * sizeof(float), 32)));
+  x0 = static_cast<float *>(
+      aligned_alloc(32, round_up_to_multiple(N * sizeof(float), 32)));
+
+  sqr_x = static_cast<float *>(
+      aligned_alloc(32, round_up_to_multiple(N * sizeof(float), 32)));
+  factor_ip = static_cast<float *>(
+      aligned_alloc(32, round_up_to_multiple(N * sizeof(float), 32)));
+  factor_ppc = static_cast<float *>(
+      aligned_alloc(32, round_up_to_multiple(N * sizeof(float), 32)));
+  error = static_cast<float *>(
+      aligned_alloc(32, round_up_to_multiple(N * sizeof(float), 32)));
+
+  input.read((char *)start, C * sizeof(uint32_t));
+  input.read((char *)len, C * sizeof(uint32_t));
+  input.read((char *)id, N * sizeof(uint32_t));
+  input.read((char *)dist_to_c, N * sizeof(float));
+  input.read((char *)x0, N * sizeof(float));
+
+  input.read((char *)centroid, C * B * sizeof(float));
+  //   input.read((char *)data, 1ull * N * D * sizeof(float));
+  input.read((char *)binary_code, 1ull * N * B / 64 * sizeof(uint64_t));
+
+#if defined(FAST_SCAN)
+  packed_start = new uint32_t[C];
+  uint32_t cur = 0;
+  for (int i = 0; i < C; i++) {
+    packed_start[i] = cur;
+    cur += (len[i] + 31) / 32 * 32 * B / 8;
+  }
+  packed_code = static_cast<uint8_t *>(
+      aligned_alloc(32, round_up_to_multiple(cur * sizeof(uint8_t), 32)));
+  for (int i = 0; i < C; i++) {
+    pack_codes<B>(binary_code + 1ull * start[i] * (B / 64), len[i],
+                  packed_code + packed_start[i]);
+  }
+#endif
+
+  for (int i = 0; i < N; i++) {
+    long double x_x0 = (long double)dist_to_c[i] / x0[i];
+    sqr_x[i] = dist_to_c[i] * dist_to_c[i];
+    error[i] =
+        2 * max_x1 * std::sqrt(x_x0 * x_x0 - dist_to_c[i] * dist_to_c[i]);
+    factor_ppc[i] =
+        -2 / fac_norm * x_x0 *
+        ((float)space.popcount(binary_code + static_cast<size_t>(i) * B / 64) *
+             2 -
+         B);
+    factor_ip[i] = -2 / fac_norm * x_x0;
+  }
+  input.close();
+  v_map = new AsyncVectorMap("/yinziqi/marco-30m/base.fvecs", num_cand, D);
   std::cerr << "IVFRN data loaded." << std::endl;
 }
 

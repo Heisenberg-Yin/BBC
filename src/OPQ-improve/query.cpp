@@ -19,15 +19,14 @@ void test(const Matrix<float> &Q, const Matrix<float> &RandQ,
 
   // ========================================================================
   // Search Parameter
-
-  vector<int> nprobes = {50, 100, 200, 300, 400, 500, 600, 700, 800};
+  vector<int> nprobes = {500};
   //   for (int i = 10; i <= 320; i += 30)
   //     nprobes.push_back(i);
 
-  uint32_t NUM_BUCKETS = 48;
+  uint32_t NUM_BUCKETS = 80;
   uint32_t PSEUDO_BUCKETS = 256;
 
-  int num_cand = 50000;
+  int num_cand = 240000;
   for (auto nprobe : nprobes) {
     TopKBufferSoA KNNs(num_cand, NUM_BUCKETS, PSEUDO_BUCKETS);
     float total_time = 0;

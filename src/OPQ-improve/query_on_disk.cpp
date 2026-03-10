@@ -10,57 +10,71 @@
 
 using namespace std;
 long double rotation_time = 0;
+extern uint32_t rerank_count;
+int num_cand = 200000;
 
 void test(const Matrix<float> &Q, const Matrix<float> &RandQ,
           const Matrix<unsigned> &G, IVF_PQFastScan &ivf, int k) {
   float sys_t, usr_t, usr_t_sum = 0, total_time = 0, search_time = 0;
   struct rusage run_start, run_end;
+
   // ========================================================================
   // Search Parameter
-  vector<int> nprobes = {600};
+  vector<int> nprobes = {200};
   //   for (int i = 10; i <= 320; i += 30)
   //     nprobes.push_back(i);
+  uint32_t NUM_BUCKETS = 80;
+  uint32_t PSEUDO_BUCKETS = 256;
 
-  int num_cand = 50000;
   for (auto nprobe : nprobes) {
+    // TopKBufferSoA KNNs(num_cand, NUM_BUCKETS, PSEUDO_BUCKETS);
+    AsyTopKBufferSoA KNNs(num_cand, NUM_BUCKETS, PSEUDO_BUCKETS);
     float total_time = 0;
     float total_ratio = 0;
     int correct = 0;
+    rerank_count = 0;
+    std::vector<std::pair<float, uint32_t>> result_ids_dist;
     for (int i = 0; i < Q.n; i++) {
+      //   std::cerr << i << std::endl;
+      KNNs.reset();
+      // ivf.as_v_map->reset();
       GetCurTime(&run_start);
-      //   ResultHeap KNNs = ivf.search(Q.data + i * Q.d, RandQ.data + i *
-      //   RandQ.d,
-      //                                num_cand, k, nprobe);
-      ResultHeap KNNs = ivf.search_on_disk(
-          Q.data + i * Q.d, RandQ.data + i * RandQ.d, num_cand, k, nprobe);
+      //   result_ids_dist = ivf.improved_search_on_disk(Q.data + i * Q.d,
+      //                                                 RandQ.data + i *
+      //                                                 RandQ.d, num_cand, k,
+      //                                                 nprobe, KNNs);
+
+      result_ids_dist = ivf.improved_search_on_disk_asy(
+          Q.data + i * Q.d, RandQ.data + i * RandQ.d, num_cand, k, nprobe,
+          KNNs);
+
       GetCurTime(&run_end);
       GetTime(&run_start, &run_end, &usr_t, &sys_t);
       total_time += usr_t * 1e6;
 
       int tmp_correct = 0;
 
-      std::vector<uint32_t> result_ids;
-      result_ids.reserve(k);
-      while (KNNs.empty() == false) {
-        int id = KNNs.top().second;
-        KNNs.pop();
-        result_ids.push_back(id);
-      }
-      sort(result_ids.begin(), result_ids.end());
+      std::sort(result_ids_dist.begin(), result_ids_dist.end(),
+                [](const std::pair<float, uint32_t> &a,
+                   const std::pair<float, uint32_t> &b) {
+                  return a.second < b.second;
+                });
 
       uint32_t p = 0, q = 0;
-      while (p < result_ids.size() && q < k) {
-        if (result_ids[p] == G.data[i * G.d + q]) {
+      while (p < result_ids_dist.size() && q < k) {
+        if (result_ids_dist[p].second == G.data[i * G.d + q]) {
           ++tmp_correct;
           ++p;
-          ++q; // 两边都匹配，向前走
-        } else if (result_ids[p] < G.data[i * G.d + q]) {
-          ++p; // result_ids 小，指针 p 向前
+          ++q;
+        } else if (result_ids_dist[p].second < G.data[i * G.d + q]) {
+          ++p;
         } else {
-          ++q; // ground_ids 小，指针 q 向前
+          ++q;
         }
       }
       correct += tmp_correct;
+      std::cerr << tmp_correct << std::endl;
+      exit(1);
     }
     float time_us_per_query = total_time / Q.n + rotation_time;
     float recall = 1.0f * correct / (Q.n * k);
@@ -73,6 +87,7 @@ void test(const Matrix<float> &Q, const Matrix<float> &RandQ,
          << "Ratio = " << average_ratio << endl;
     cout << "Time = " << time_us_per_query
          << " us \t QPS = " << 1e6 / (time_us_per_query) << " query/s" << endl;
+    cout << "average rerank_count: " << rerank_count / Q.n << endl;
   }
 }
 
@@ -123,19 +138,19 @@ int main(int argc, char *argv[]) {
   std::cerr << "queryk: " << queryk << std::endl;
 
   char rotated_path[256] = "";
-  sprintf(rotated_path, "./data/rotation_%s.fvecs", dataset);
+  sprintf(rotated_path, "/yinziqi/%s/rotation_%s.fvecs", dataset, dataset);
   Matrix<float> opq(rotated_path);
 
   char query_path[256] = "";
-  sprintf(query_path, "%squery.fvecs", source, dataset);
+  sprintf(query_path, "/yinziqi/%s/query.fvecs", dataset);
   Matrix<float> query(query_path);
 
   char groundtruth_path[256] = "";
-  sprintf(groundtruth_path, "%stop%d_results.ivecs", source, queryk);
+  sprintf(groundtruth_path, "/yinziqi/%s/top%d_results.ivecs", dataset, queryk);
   Matrix<unsigned> G(groundtruth_path);
 
   char index_path[256];
-  sprintf(index_path, "./data/ivfpq_%s.index", dataset);
+  sprintf(index_path, "/yinziqi/%s/ivfpq_%s.index", dataset, dataset);
 
   float sys_t, usr_t, usr_t_sum = 0, total_time = 0, search_time = 0;
   struct rusage run_start, run_end;
@@ -149,7 +164,7 @@ int main(int argc, char *argv[]) {
   rotation_time = usr_t * 1e6 / query.n;
 
   IVF_PQFastScan ivfpq;
-  ivfpq.load(index_path);
+  ivfpq.load_disk(index_path, num_cand);
 
   ivfpq.rotate_centroid(opq);
 

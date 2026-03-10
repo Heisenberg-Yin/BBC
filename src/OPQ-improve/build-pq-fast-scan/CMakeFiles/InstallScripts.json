@@ -1,7 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"/mnt/hdd/yinziqi/yinziqi/large-heap/src/OPQ/build-pq-fast-scan/cmake_install.cmake"
-	],
-	"Parallel" : false
-}
