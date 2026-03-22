@@ -69,8 +69,8 @@ public:
                   TopKBufferSoA &upper_KNNs) const;
 
   std::vector<std::pair<float, uint32_t>>
-  improved_search_on_disk(float *query, float *rd_query, uint32_t k,
-                          uint32_t nprobe, TopKBufferSoA &upper_KNNs);
+  improved_search_on_disk_asy(float *query, float *rd_query, uint32_t k,
+                              uint32_t nprobe, TopKBufferSoA &upper_KNNs);
 
   inline void rerank(float *query, float *data, uint32_t k,
                      TopKBufferSoA &upper_KNNs,
@@ -479,7 +479,6 @@ void IVFRN<D, B>::rerank_with_io(
     float *query, float *data, uint32_t k, TopKBufferSoA &upper_KNNs,
     std::vector<std::pair<float, uint32_t>> &KNNs) {
 
-  const int num_buckets = upper_KNNs.get_physical_bucket_num();
   int th_code = upper_KNNs.get_physical_threshold_bucket_id();
 
   const float delta = upper_KNNs.get_delta();
@@ -487,57 +486,12 @@ void IVFRN<D, B>::rerank_with_io(
   const float inv_delta = 1.0f / delta;
   constexpr size_t CL = (D * sizeof(float) + 63) / 64;
 
-  // 1. Move entries from upper buckets (>= th) to lower_buffer
-  //    此时 id 仍是 local index
-  for (int i = th_code; i < num_buckets; ++i) {
-    auto &bucket = upper_KNNs.get_buffer()[i];
-    const float *lb_ptr = bucket.val_data();
-    const uint32_t *id_ptr = bucket.idx_data();
-    const uint32_t sz = bucket.size();
-
-    for (uint32_t j = 0; j < sz; ++j) {
-      int lb_code =
-          std::clamp(static_cast<int>((*lb_ptr - lowest) * inv_delta), 0, 255);
-      upper_KNNs.push_lower(lb_code, *lb_ptr, *id_ptr);
-      ++lb_ptr;
-      ++id_ptr;
-    }
-    bucket.clear();
-  }
-
-  // 2. 对 [0, th) 的 buffer + lower_buffer 提交 IO
-  //    bucket 中保持 local_idx 不变（用于 v_map->get_vector），
-  //    最终输出结果时才转 global_id
-  {
-    std::vector<uint32_t> local_ids;
-    local_ids.reserve(k * 100);
-
-    auto collect_ids = [&](auto &bucket) {
-      int sz = bucket.size();
-      if (sz == 0)
-        return;
-      const uint32_t *id_ptr = bucket.idx_data();
-      for (int j = 0; j < sz; ++j)
-        local_ids.emplace_back(id_ptr[j]);
-    };
-
-    uint32_t threshold_bucket = upper_KNNs.get_physical_threshold_bucket_id();
-    auto &buffers = upper_KNNs.get_buffer();
-    auto &lower_buffers = upper_KNNs.get_lower_buffer();
-
-    for (uint32_t i = 0; i < threshold_bucket; ++i) {
-      collect_ids(buffers[i]);
-      collect_ids(lower_buffers[i]);
-    }
-
-    v_map->submit_ids_async(local_ids);
-    v_map->wait_all();
-  }
-
-  //   clear above
+  // move upper→lower 和异步 IO 提交已在 nprobe 循环中分批完成，
+  // 这里只需等待所有异步 IO 完成。
+  v_map->wait_all();
 
   int lower_idx = 0;
-  int upper_idx = upper_KNNs.get_physical_threshold_bucket_id() - 1;
+  int upper_idx = th_code - 1;
 
   while (upper_idx > lower_idx) {
     // Process upper buckets
@@ -598,7 +552,7 @@ void IVFRN<D, B>::rerank_with_io(
     const uint32_t *id_ptr = bucket.idx_data();
     const float *val_ptr = bucket.val_data();
     for (uint32_t i = 0; i < sz; ++i) {
-      KNNs.emplace_back(val_ptr[i], id[id_ptr[i]]);  // local_idx → global_id
+      KNNs.emplace_back(val_ptr[i], id[id_ptr[i]]); // local_idx → global_id
     }
   };
 
@@ -620,7 +574,7 @@ void IVFRN<D, B>::rerank_with_io(
     const uint32_t *id_ptr = ex_bucket.idx_data();
     for (uint32_t j = 0; j < ex_bucket.size(); ++j) {
       if (data_ptr[j] < distK) {
-        tempres.push(data_ptr[j], id[id_ptr[j]]);  // local_idx → global_id
+        tempres.push(data_ptr[j], id[id_ptr[j]]); // local_idx → global_id
         if (tempres.size() > remaining_size)
           tempres.pop();
         if (tempres.size() == remaining_size)
@@ -830,9 +784,9 @@ void IVFRN<D, B>::sample_bound_fast_scan(
 // search impl
 template <uint32_t D, uint32_t B>
 std::vector<std::pair<float, uint32_t>>
-IVFRN<D, B>::improved_search_on_disk(float *query, float *rd_query, uint32_t k,
-                                     uint32_t nprobe,
-                                     TopKBufferSoA &upper_KNNs) {
+IVFRN<D, B>::improved_search_on_disk_asy(float *query, float *rd_query,
+                                         uint32_t k, uint32_t nprobe,
+                                         TopKBufferSoA &upper_KNNs) {
   // The default value of distK is +inf
   std::vector<std::pair<float, uint32_t>> KNNs;
   KNNs.reserve(k);
@@ -878,19 +832,21 @@ IVFRN<D, B>::improved_search_on_disk(float *query, float *rd_query, uint32_t k,
 
   build_codebook_from_samples(probe_infos, nprobe, k, upper_KNNs);
 
-  // bound_fast_scan + 异步IO流水线：每扫完一个 cluster，立刻提交该 cluster
-  // 新增候选向量的磁盘读请求，与下一个 cluster 的计算重叠。
-  //
-  // threshold 单调递减，只需提交 [0, th) 范围内的新增条目。
-  // 高桶 [th, num_buckets) 的条目会在 rerank_with_io 初期被 move 到
-  // lower_buffer，那里会单独补提交 IO。
+  // bound_fast_scan + 异步IO流水线：每扫完一个 cluster，立刻将高桶条目
+  // move 到 lower_buffer，并提交所有新增候选向量的磁盘读请求，
+  // 与下一个 cluster 的计算重叠，实现全程分批异步 IO。
   const uint32_t num_phys = upper_KNNs.get_physical_bucket_num();
   std::vector<uint32_t> prev_buf_sz(num_phys, 0);
   std::vector<uint32_t> prev_low_sz(num_phys, 0);
-  std::vector<uint32_t> new_global_ids;
-  new_global_ids.reserve(4096);
+  uint32_t prev_th = num_phys; // 上一轮的 threshold，初始为桶总数
+
+  const float delta = upper_KNNs.get_delta();
+  const float lowest = upper_KNNs.get_lower();
+  const float inv_delta = 1.0f / delta;
 
   for (int pb = 0; pb < nprobe; pb++) {
+    std::vector<uint32_t> new_global_ids;
+    new_global_ids.reserve(4096);
     ProbeInfo<B> &info = probe_infos[pb];
     uint32_t c = info.cluster_id;
 #if defined(FAST_SCAN)
@@ -902,24 +858,40 @@ IVFRN<D, B>::improved_search_on_disk(float *query, float *rd_query, uint32_t k,
 #endif
     upper_KNNs.update_th_code();
 
-    // 只收集 [0, th) 范围内各 bucket 新增的条目（用 local_idx 做 IO）
     uint32_t th = upper_KNNs.get_physical_threshold_bucket_id();
-    new_global_ids.clear();
     auto &bufs = upper_KNNs.get_buffer();
     auto &lbufs = upper_KNNs.get_lower_buffer();
+
+    // 将 [th, prev_th) 范围内的高桶条目 move 到 lower_buffer
+    for (uint32_t bi = th; bi < prev_th; ++bi) {
+      auto &bucket = bufs[bi];
+      const float *lb_ptr = bucket.val_data();
+      const uint32_t *id_ptr = bucket.idx_data();
+      const uint32_t sz = bucket.size();
+      for (uint32_t j = 0; j < sz; ++j) {
+        int lb_code = std::clamp(
+            static_cast<int>((lb_ptr[j] - lowest) * inv_delta), 0, 255);
+        upper_KNNs.push_lower(lb_code, lb_ptr[j], id_ptr[j]);
+      }
+      bucket.clear();
+      prev_buf_sz[bi] = 0; // 已 clear，重置计数
+    }
+    prev_th = th;
+
+    // 收集 [0, th) 范围内 buffer + lower_buffer 的增量条目
     for (uint32_t bi = 0; bi < th; ++bi) {
       {
         const uint32_t new_sz = static_cast<uint32_t>(bufs[bi].size());
         const uint32_t *id_ptr = bufs[bi].idx_data();
         for (uint32_t j = prev_buf_sz[bi]; j < new_sz; ++j)
-          new_global_ids.push_back(id_ptr[j]);  // local_idx
+          new_global_ids.push_back(id_ptr[j]);
         prev_buf_sz[bi] = new_sz;
       }
       {
         const uint32_t new_sz = static_cast<uint32_t>(lbufs[bi].size());
         const uint32_t *id_ptr = lbufs[bi].idx_data();
         for (uint32_t j = prev_low_sz[bi]; j < new_sz; ++j)
-          new_global_ids.push_back(id_ptr[j]);  // local_idx
+          new_global_ids.push_back(id_ptr[j]);
         prev_low_sz[bi] = new_sz;
       }
     }
@@ -927,17 +899,7 @@ IVFRN<D, B>::improved_search_on_disk(float *query, float *rd_query, uint32_t k,
       v_map->submit_ids_async(new_global_ids);
   }
 
-  // 等待所有异步 IO 完成
-  {
-    // struct rusage io_start, io_end;
-    // float io_usr, io_sys;
-    // GetCurTime(&io_start);
-    v_map->wait_all();
-    // GetCurTime(&io_end);
-    // GetTime(&io_start, &io_end, &io_usr, &io_sys);
-    // std::cerr << "wait_all: " << io_usr * 1e6 << " us" << std::endl;
-  }
-
+  // wait_all 已移至 rerank_with_io 开头，无需在此等待
   rerank_with_io(query, data, k, upper_KNNs, KNNs);
   return KNNs;
 }

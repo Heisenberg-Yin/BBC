@@ -44,7 +44,7 @@ void test(const Matrix<float> &Q, const Matrix<float> &RandQ,
       upper_KNNs.reset();
       GetCurTime(&run_start);
       std::vector<std::pair<float, uint32_t>> result_ids =
-          ivf.improved_search_on_disk(Q.data + i * Q.d,
+          ivf.improved_search_on_disk_asy(Q.data + i * Q.d,
                                       RandQ.data + i * RandQ.d, k, nprobe,
                                       upper_KNNs);
       GetCurTime(&run_end);
