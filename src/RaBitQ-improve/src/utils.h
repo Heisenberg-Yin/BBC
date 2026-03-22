@@ -19,30 +19,34 @@ private:
   int fd;
   io_context_t ctx;
   size_t D;
-  size_t record_size;
+  size_t record_size; // 每条记录大小（纯 raw float: D * sizeof(float)）
   unsigned max_events; // 记录队列最大容量
-  //   std::vector<float *> ptrs_;
   float *pool_base;
-  size_t max_cache_size; // 池子最大容量（如 100,000）
-  // std::atomic<size_t> pool_idx; // 当前已使用的位置
+  size_t max_cache_size;
+  size_t pool_used; // 当前 pool 已分配的槽数
   robin_hood::unordered_flat_map<uint32_t, uint32_t> id_to_ptr_;
-  //   mutable std::mutex map_mutex_;
+
+  // 流水线状态：在 bound_fast_scan 完成后逐批提交的 iocb
+  std::vector<struct iocb> pipeline_cbs_;
+  std::vector<struct iocb *> pipeline_p_cbs_;
+  std::vector<struct io_event> pipeline_events_;
+  size_t pipeline_submitted_; // 已向内核提交的总数
+  size_t pipeline_completed_; // 已收割完成的总数
 
 public:
-  // 修改：保存 max_ctx 到成员变量
   AsyncVectorMap(const char *path, size_t cache_capacity, size_t d,
                  unsigned max_ctx = 4096)
-      : D(d), max_events(max_ctx), max_cache_size(cache_capacity) {
+      : D(d), max_events(max_ctx), max_cache_size(cache_capacity),
+        pool_used(0), pipeline_submitted_(0), pipeline_completed_(0) {
 
-    // 如果不用 O_DIRECT，libaio 经常会退化成同步阻塞，但兼容性更好。
-    // 如果追求极致性能且能处理对齐，建议加上 O_DIRECT。
     fd = open(path, O_RDONLY);
     if (fd < 0) {
       perror("Failed to open base file");
       exit(-1);
     }
 
-    record_size = sizeof(unsigned) + D * sizeof(float);
+    // 纯 raw float 格式（base_aligned_grouped.fvecs），无 per-record dim header
+    record_size = D * sizeof(float);
     ctx = 0;
     if (io_setup(max_ctx, &ctx) != 0) {
       perror("io_setup failed");
@@ -56,15 +60,23 @@ public:
     }
 
     id_to_ptr_.reserve(cache_capacity);
-    // ptrs_(n, nullptr);
+    pipeline_cbs_.reserve(cache_capacity);
+    pipeline_p_cbs_.reserve(cache_capacity);
+    pipeline_events_.resize(cache_capacity);
   }
-  void reset() { id_to_ptr_.clear(); }
 
-  // 修改：通过索引计算指针
+  void reset() {
+    id_to_ptr_.clear();
+    pool_used = 0;
+    pipeline_submitted_ = 0;
+    pipeline_completed_ = 0;
+    pipeline_cbs_.clear();
+    pipeline_p_cbs_.clear();
+  }
+
   inline float *get_vector(uint32_t id) const {
     auto it = id_to_ptr_.find(id);
     if (it != id_to_ptr_.end()) {
-      // 指针 = 基础地址 + 索引 * 维度
       return pool_base + (static_cast<size_t>(it->second) * D);
     } else {
       std::cerr << "Error: AsyncVectorMap miss id " << id << std::endl;
@@ -72,92 +84,145 @@ public:
     }
   }
 
+  // -----------------------------------------------------------------------
+  // 流水线接口：在每个 cluster 的 bound_fast_scan 完成后调用
+  // 传入该 cluster 的候选 global_ids（已做 id[] 转换），立即提交 AIO 请求
+  // -----------------------------------------------------------------------
+  void submit_ids_async(const std::vector<uint32_t> &global_ids) {
+    for (uint32_t gid : global_ids) {
+      if (id_to_ptr_.count(gid))
+        continue; // 已经在 pool 中，跳过
+
+      size_t slot = pool_used++;
+      float *target_ptr = pool_base + slot * D;
+      size_t offset = 1ULL * gid * record_size;
+
+      pipeline_cbs_.emplace_back();
+      struct iocb &cb = pipeline_cbs_.back();
+      io_prep_pread(&cb, fd, target_ptr, D * sizeof(float), offset);
+      cb.data = (void *)(uintptr_t)gid;
+      pipeline_p_cbs_.push_back(&cb);
+
+      // 标记 slot，防止同一 id 重复分配
+      id_to_ptr_[gid] = static_cast<uint32_t>(slot);
+    }
+
+    // 将新增的、尚未提交的 iocb 批量提交给内核
+    size_t total = pipeline_p_cbs_.size();
+    while (pipeline_submitted_ < total) {
+      size_t in_flight = pipeline_submitted_ - pipeline_completed_;
+      if (in_flight >= max_events) break; // 队列满，等收割后再提交
+
+      size_t to_submit =
+          std::min(total - pipeline_submitted_, max_events - in_flight);
+      int ret = io_submit(ctx, (long)to_submit,
+                          pipeline_p_cbs_.data() + pipeline_submitted_);
+      if (ret > 0) {
+        pipeline_submitted_ += ret;
+      } else if (ret == -EAGAIN) {
+        break;
+      } else {
+        fprintf(stderr, "io_submit fatal: %s\n", strerror(-ret));
+        exit(-1);
+      }
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // 流水线结束：等待所有已提交的 IO 完成
+  // -----------------------------------------------------------------------
+  void wait_all() {
+    // 先把剩余未提交的全部提交
+    size_t total = pipeline_p_cbs_.size();
+    while (pipeline_submitted_ < total) {
+      size_t in_flight = pipeline_submitted_ - pipeline_completed_;
+      // 先收割一些，腾出队列空间
+      if (in_flight >= max_events) {
+        int r = io_getevents(ctx, 1, (int)in_flight,
+                             pipeline_events_.data() + pipeline_completed_,
+                             nullptr);
+        if (r > 0) pipeline_completed_ += r;
+        else if (r < 0) { fprintf(stderr, "io_getevents fatal: %s\n", strerror(-r)); exit(-1); }
+        in_flight = pipeline_submitted_ - pipeline_completed_;
+      }
+      size_t to_submit =
+          std::min(total - pipeline_submitted_, max_events - in_flight);
+      int ret = io_submit(ctx, (long)to_submit,
+                          pipeline_p_cbs_.data() + pipeline_submitted_);
+      if (ret > 0) pipeline_submitted_ += ret;
+      else if (ret == -EAGAIN) {
+        // 收割后重试
+        int r = io_getevents(ctx, 1, (int)(pipeline_submitted_ - pipeline_completed_),
+                             pipeline_events_.data() + pipeline_completed_, nullptr);
+        if (r > 0) pipeline_completed_ += r;
+      } else {
+        fprintf(stderr, "io_submit fatal: %s\n", strerror(-ret));
+        exit(-1);
+      }
+    }
+
+    // 等待所有已提交的完成
+    while (pipeline_completed_ < pipeline_submitted_) {
+      int r = io_getevents(ctx, 1,
+                           (int)(pipeline_submitted_ - pipeline_completed_),
+                           pipeline_events_.data() + pipeline_completed_,
+                           nullptr);
+      if (r > 0) {
+        pipeline_completed_ += r;
+      } else if (r < 0) {
+        fprintf(stderr, "io_getevents fatal: %s\n", strerror(-r));
+        exit(-1);
+      }
+    }
+    // 注意：id_to_ptr_ 已在 submit_ids_async 中提前写入，无需再建立映射
+  }
+
+  // -----------------------------------------------------------------------
+  // 原有批量接口（保留兼容）
+  // -----------------------------------------------------------------------
   void fetch_to_cache(const std::vector<uint32_t> &miss_ids) {
     if (miss_ids.empty())
       return;
     size_t n = miss_ids.size();
     std::vector<struct iocb> cbs(n);
     std::vector<struct iocb *> p_cbs(n);
-    // std::cerr << "AIO fetch " << n << " vectors from disk." << std::endl;
-    // 1. 预分配池子空间，直接设置 DMA 目标地址
     for (size_t i = 0; i < n; ++i) {
-      //   if (slot >= max_cache_size)
-      //     break; // 池子满了处理逻辑
       float *target_ptr = pool_base + (i * D);
-
-      size_t offset =
-          1ULL * miss_ids[i] * record_size + sizeof(unsigned); // skip ID
-
-      // memset(&cbs[i], 0, sizeof(struct iocb));
-      // 【零拷贝】磁盘数据直接进入 Pool，不经过临时 buffer
+      size_t offset = 1ULL * miss_ids[i] * record_size;
       io_prep_pread(&cbs[i], fd, target_ptr, D * sizeof(float), offset);
       cbs[i].data = (void *)(uintptr_t)miss_ids[i];
       p_cbs[i] = &cbs[i];
     }
-    const size_t BATCH_SIZE = max_events; // 严格遵守队列上限
+    const size_t BATCH_SIZE = max_events;
     size_t submitted = 0;
     size_t completed = 0;
     std::vector<struct io_event> events(n);
 
     while (completed < n) {
-      // --- 提交阶段 ---
-      // 只要已提交且未完成的数量小于 BATCH_SIZE，就可以继续提交
       while (submitted < n && (submitted - completed) < BATCH_SIZE) {
         size_t to_submit =
             std::min(n - submitted, BATCH_SIZE - (submitted - completed));
         int ret = io_submit(ctx, to_submit, p_cbs.data() + submitted);
-
         if (ret < 0) {
-          if (ret == -EAGAIN)
-            break; // 队列真的满了，停止提交去收割 event
+          if (ret == -EAGAIN) break;
           fprintf(stderr, "io_submit fatal: %s\n", strerror(-ret));
           exit(-1);
         }
         submitted += ret;
       }
-
-      // --- 收割阶段 ---
-      // 如果提交满了或者还有未完成的，必须等待至少 1 个 event
-      // 返回以释放队列空间
       if (completed < submitted) {
-        // 参数说明：ctx, min_nr, max_nr, events, timeout
         int r = io_getevents(ctx, 1, submitted - completed,
                              events.data() + completed, nullptr);
-        if (r > 0) {
-          completed += r;
-        } else if (r < 0) {
-          fprintf(stderr, "io_getevents fatal: %s\n", strerror(-r));
-          exit(-1);
-        }
+        if (r > 0) completed += r;
+        else if (r < 0) { fprintf(stderr, "io_getevents fatal: %s\n", strerror(-r)); exit(-1); }
       }
     }
-
-    // 4. 建立映射
     for (size_t i = 0; i < n; ++i) {
       uint32_t id = (uint32_t)(uintptr_t)events[i].obj->data;
       float *buf_ptr = (float *)events[i].obj->u.c.buf;
       uint32_t pool_idx = (buf_ptr - pool_base) / D;
       id_to_ptr_[id] = pool_idx;
     }
-
-    // // 2. 提交 AIO
-    // int ret = io_submit(ctx, n, p_cbs.data());
-    // int completed = 0;
-    // while (completed < ret) {
-    //   int r = io_getevents(ctx, ret - completed, ret - completed,
-    //   events.data(),
-    //                        nullptr);
-    //   if (r > 0)
-    //     completed += r;
-    // }
-
-    // 3. 写入哈希表，之后 get(id) 就能立刻返回了
-    // {
-    //   //   std::lock_guard<std::mutex> lock(map_mutex_);
-    //   for (size_t i = 0; i < n; ++i) {
-    //     id_to_ptr_[miss_ids[i]] = i;
-    //   }
-    // }
   }
 
   //   void fetch_vectors(const std::vector<uint32_t> &ids, float *data_ptr) {

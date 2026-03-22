@@ -441,64 +441,38 @@ void IVFRN<D, B>::rerank(float *query, float *data, uint32_t k,
   }
 }
 
-template <uint32_t D, uint32_t B>
-void IVFRN<D, B>::load_candidate_from_disk(TopKBufferSoA &KNNs, unsigned k) {
-  std::vector<uint32_t> candidate_ids;
-  // 启发式预留空间，防止频繁扩容
-  candidate_ids.reserve(k * 100);
+// template <uint32_t D, uint32_t B>
+// void IVFRN<D, B>::load_candidate_from_disk(TopKBufferSoA &KNNs, unsigned k) {
+//   // 将 bucket 内的 local index 替换为 global id，并（若尚未 IO）提交磁盘读取
+//   std::vector<uint32_t> candidate_ids;
+//   candidate_ids.reserve(k * 100);
 
-  // 封装 ID 转换逻辑，避免重复代码
-  auto process_bucket = [&](auto &bucket) {
-    int sz = bucket.size();
-    if (sz == 0)
-      return;
+//   auto process_bucket = [&](auto &bucket) {
+//     int sz = bucket.size();
+//     if (sz == 0)
+//       return;
+//     uint32_t *id_ptr = bucket.data_idx();
+//     for (int j = 0; j < sz; ++j) {
+//       uint32_t global_id = id[id_ptr[j]];
+//       candidate_ids.emplace_back(global_id);
+//       id_ptr[j] = global_id;
+//     }
+//   };
 
-    // 获取非 const 指针以便修改原始数据
-    uint32_t *id_ptr = bucket.data_idx();
-    for (int j = 0; j < sz; ++j) {
-      // 假设 id 是成员变量，存储的是映射关系
-      uint32_t global_id = id[id_ptr[j]];
-      candidate_ids.emplace_back(global_id);
-      // 将 bucket 内的局部偏移替换为全局 ID
-      id_ptr[j] = global_id;
-    }
-  };
+//   uint32_t threshold_bucket = KNNs.get_physical_threshold_bucket_id();
+//   auto &buffers = KNNs.get_buffer();
+//   auto &lower_buffers = KNNs.get_lower_buffer();
 
-  uint32_t threshold_bucket = KNNs.get_physical_threshold_bucket_id();
-  auto &buffers = KNNs.get_buffer();
-  auto &lower_buffers = KNNs.get_lower_buffer();
+//   for (uint32_t i = 0; i < threshold_bucket; ++i) {
+//     process_bucket(buffers[i]);
+//     process_bucket(lower_buffers[i]);
+//   }
 
-  for (uint32_t i = 0; i <= threshold_bucket; ++i) {
-    // 分别处理两个 buffer 层，不再相互覆盖
-    process_bucket(buffers[i]);
-    process_bucket(lower_buffers[i]);
-  }
-
-  // 在批量读取前，对 ID 进行排序和去重通常能大幅提升磁盘 I/O 效率
-  //   std::sort(candidate_ids.begin(), candidate_ids.end());
-  v_map->fetch_to_cache(candidate_ids);
-  //   for (uint32_t i = 0; i <= KNNs.get_physical_threshold_bucket_id(); ++i) {
-  //     auto &bucket = KNNs.get_buffer()[i];
-  //     int j = 0;
-  //     int sz = bucket.size();
-  //     const uint32_t *id_ptr = bucket.idx_data();
-  //     while (j < sz) {
-  //       candidate_ids.emplace_back(*(id + (id_ptr[j])));
-  //       id_ptr[j] = *(id + (id_ptr[j]));
-  //       j++;
-  //     }
-  //     bucket = KNNs.get_lower_buffer()[i];
-  //     j = 0;
-  //     sz = bucket.size();
-  //     id_ptr = bucket.idx_data();
-  //     while (j < sz) {
-  //       candidate_ids.emplace_back(*(id + (id_ptr[j])));
-  //       id_ptr[j] = *(id + (id_ptr[j]));
-  //       j++;
-  //     }
-  //   }
-  //   v_map->fetch_to_cache(candidate_ids);
-}
+//   // 无论流水线是否已提交过部分 IO，都对缺失的 id 补提交
+//   // submit_ids_async 内部会跳过已在 cache 中的 id，所以不会重复读取
+//   v_map->submit_ids_async(candidate_ids);
+//   v_map->wait_all();
+// }
 
 template <uint32_t D, uint32_t B>
 void IVFRN<D, B>::rerank_with_io(
@@ -513,7 +487,8 @@ void IVFRN<D, B>::rerank_with_io(
   const float inv_delta = 1.0f / delta;
   constexpr size_t CL = (D * sizeof(float) + 63) / 64;
 
-  // Move entries from upper buckets to lower
+  // 1. Move entries from upper buckets (>= th) to lower_buffer
+  //    此时 id 仍是 local index
   for (int i = th_code; i < num_buckets; ++i) {
     auto &bucket = upper_KNNs.get_buffer()[i];
     const float *lb_ptr = bucket.val_data();
@@ -530,7 +505,34 @@ void IVFRN<D, B>::rerank_with_io(
     bucket.clear();
   }
 
-  load_candidate_from_disk(upper_KNNs, k);
+  // 2. 对 [0, th) 的 buffer + lower_buffer 提交 IO
+  //    bucket 中保持 local_idx 不变（用于 v_map->get_vector），
+  //    最终输出结果时才转 global_id
+  {
+    std::vector<uint32_t> local_ids;
+    local_ids.reserve(k * 100);
+
+    auto collect_ids = [&](auto &bucket) {
+      int sz = bucket.size();
+      if (sz == 0)
+        return;
+      const uint32_t *id_ptr = bucket.idx_data();
+      for (int j = 0; j < sz; ++j)
+        local_ids.emplace_back(id_ptr[j]);
+    };
+
+    uint32_t threshold_bucket = upper_KNNs.get_physical_threshold_bucket_id();
+    auto &buffers = upper_KNNs.get_buffer();
+    auto &lower_buffers = upper_KNNs.get_lower_buffer();
+
+    for (uint32_t i = 0; i < threshold_bucket; ++i) {
+      collect_ids(buffers[i]);
+      collect_ids(lower_buffers[i]);
+    }
+
+    v_map->submit_ids_async(local_ids);
+    v_map->wait_all();
+  }
 
   //   clear above
 
@@ -596,7 +598,7 @@ void IVFRN<D, B>::rerank_with_io(
     const uint32_t *id_ptr = bucket.idx_data();
     const float *val_ptr = bucket.val_data();
     for (uint32_t i = 0; i < sz; ++i) {
-      KNNs.emplace_back(val_ptr[i], id_ptr[i]);
+      KNNs.emplace_back(val_ptr[i], id[id_ptr[i]]);  // local_idx → global_id
     }
   };
 
@@ -618,7 +620,7 @@ void IVFRN<D, B>::rerank_with_io(
     const uint32_t *id_ptr = ex_bucket.idx_data();
     for (uint32_t j = 0; j < ex_bucket.size(); ++j) {
       if (data_ptr[j] < distK) {
-        tempres.push(data_ptr[j], id_ptr[j]);
+        tempres.push(data_ptr[j], id[id_ptr[j]]);  // local_idx → global_id
         if (tempres.size() > remaining_size)
           tempres.pop();
         if (tempres.size() == remaining_size)
@@ -876,18 +878,64 @@ IVFRN<D, B>::improved_search_on_disk(float *query, float *rd_query, uint32_t k,
 
   build_codebook_from_samples(probe_infos, nprobe, k, upper_KNNs);
 
+  // bound_fast_scan + 异步IO流水线：每扫完一个 cluster，立刻提交该 cluster
+  // 新增候选向量的磁盘读请求，与下一个 cluster 的计算重叠。
+  //
+  // threshold 单调递减，只需提交 [0, th) 范围内的新增条目。
+  // 高桶 [th, num_buckets) 的条目会在 rerank_with_io 初期被 move 到
+  // lower_buffer，那里会单独补提交 IO。
+  const uint32_t num_phys = upper_KNNs.get_physical_bucket_num();
+  std::vector<uint32_t> prev_buf_sz(num_phys, 0);
+  std::vector<uint32_t> prev_low_sz(num_phys, 0);
+  std::vector<uint32_t> new_global_ids;
+  new_global_ids.reserve(4096);
+
   for (int pb = 0; pb < nprobe; pb++) {
     ProbeInfo<B> &info = probe_infos[pb];
     uint32_t c = info.cluster_id;
-    float *ptr_data = data + 1ull * D * start[c];
 #if defined(FAST_SCAN)
-    bound_fast_scan(upper_KNNs, query, ptr_data, k, info.LUT,
+    bound_fast_scan(upper_KNNs, query, /*ptr_data=*/nullptr, k, info.LUT,
                     packed_code + packed_start[c], len[c], sqr_x + start[c],
                     factor_ip + start[c], factor_ppc + start[c],
                     error + start[c], info.sqr_y, info.vl, info.width,
                     info.sum_q, start[c]);
 #endif
     upper_KNNs.update_th_code();
+
+    // 只收集 [0, th) 范围内各 bucket 新增的条目（用 local_idx 做 IO）
+    uint32_t th = upper_KNNs.get_physical_threshold_bucket_id();
+    new_global_ids.clear();
+    auto &bufs = upper_KNNs.get_buffer();
+    auto &lbufs = upper_KNNs.get_lower_buffer();
+    for (uint32_t bi = 0; bi < th; ++bi) {
+      {
+        const uint32_t new_sz = static_cast<uint32_t>(bufs[bi].size());
+        const uint32_t *id_ptr = bufs[bi].idx_data();
+        for (uint32_t j = prev_buf_sz[bi]; j < new_sz; ++j)
+          new_global_ids.push_back(id_ptr[j]);  // local_idx
+        prev_buf_sz[bi] = new_sz;
+      }
+      {
+        const uint32_t new_sz = static_cast<uint32_t>(lbufs[bi].size());
+        const uint32_t *id_ptr = lbufs[bi].idx_data();
+        for (uint32_t j = prev_low_sz[bi]; j < new_sz; ++j)
+          new_global_ids.push_back(id_ptr[j]);  // local_idx
+        prev_low_sz[bi] = new_sz;
+      }
+    }
+    if (!new_global_ids.empty())
+      v_map->submit_ids_async(new_global_ids);
+  }
+
+  // 等待所有异步 IO 完成
+  {
+    // struct rusage io_start, io_end;
+    // float io_usr, io_sys;
+    // GetCurTime(&io_start);
+    v_map->wait_all();
+    // GetCurTime(&io_end);
+    // GetTime(&io_start, &io_end, &io_usr, &io_sys);
+    // std::cerr << "wait_all: " << io_usr * 1e6 << " us" << std::endl;
   }
 
   rerank_with_io(query, data, k, upper_KNNs, KNNs);
@@ -1415,7 +1463,8 @@ void IVFRN<D, B>::load_disk(char *filename, uint32_t num_cand) {
     factor_ip[i] = -2 / fac_norm * x_x0;
   }
   input.close();
-  v_map = new AsyncVectorMap("/yinziqi/marco-30m/base.fvecs", num_cand, D);
+  v_map = new AsyncVectorMap("/yinziqi/marco-30m/base_aligned_grouped.fvecs",
+                             num_cand, D);
   std::cerr << "IVFRN data loaded." << std::endl;
 }
 
